@@ -151,7 +151,7 @@ export const DatabaseScreen: React.FC<Props> = ({ onBack }) => {
       {/* Uma coluna no estreito, duas no largo. A lista de campanhas é curta e
           não merece metade de um monitor. */}
       <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[300px_1fr]">
-        <aside className="border-r border-white/10 overflow-y-auto p-3 space-y-2 max-h-48 lg:max-h-none">
+        <aside className="border-r border-white/10 overflow-y-auto p-3 space-y-2 max-h-48 lg:max-h-none lg:pb-[calc(2.5rem+env(safe-area-inset-bottom))]">
           {!list.length && <p className="text-sm text-slate-400">Nenhuma campanha.</p>}
           {/* div, e não button: um <button> dentro de outro é HTML inválido, e
               o navegador desfaz o aninhamento de um jeito que deixa o apagar
@@ -243,7 +243,16 @@ export const DatabaseScreen: React.FC<Props> = ({ onBack }) => {
                 </div>
               </div>
 
-              <div className="flex-1 min-h-0 overflow-auto">
+              {/* Espaço de rolagem por baixo da barra do Android.
+                  A tela é `fixed inset-0`, então ela ignora o padding de área
+                  segura do <body> — e a barra de navegação ficava POR CIMA das
+                  últimas linhas. Como padding dentro de um container rolável, o
+                  espaço vira rolagem extra: a última linha sobe até ficar
+                  visível em vez de ser recortada. */}
+              <div
+                className="flex-1 min-h-0 overflow-auto"
+                style={{ paddingBottom: 'calc(2.5rem + env(safe-area-inset-bottom))' }}
+              >
                 <table className="w-full text-xs tabular-nums">
                   <thead className="sticky top-0 bg-background-dark text-slate-400">
                     <tr className="text-left">

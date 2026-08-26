@@ -217,8 +217,30 @@ export function parseTelemetry(line: string): RadioState | null {
   // A linha precisa estar INTEIRA para virar telemetria. `band` ausente ou
   // vazio é a assinatura de um quadro partido — foi assim que uma campanha
   // ficou gravada com band="" em vez de "433".
-  if (num('rssi') === undefined) return null;
+  const rawRssi = num('rssi');
+  if (rawRssi === undefined) return null;
   if (!kv.band || kv.link === undefined) return null;
+
+  /*
+   * rssi >= 0 é AUSÊNCIA de leitura, não uma leitura de zero.
+   *
+   * O firmware inicializa rssi_/snr_/lq_ em zero e só os sobrescreve quando um
+   * quadro chega (range_test.cpp, onFrame). Enquanto não houver enlace, a
+   * telemetria sai com `rssi=0.0 snr=0.0 lq=0` — que o app aceitava como
+   * medida válida.
+   *
+   * O estrago é o mesmo do NaN corrigido antes: numa escala negativa, zero é
+   * sempre o MAIOR valor, então qualquer campanha que comece sem enlace passava
+   * a reportar "melhor RSSI: 0 dBm" para sempre. Aconteceu na Lora1913.
+   *
+   * O corte é físico, não um chute: um LoRa a 0 dBm na antena significaria o
+   * transmissor encostado com potência absurda — a faixa útil vai de -40 a
+   * -130 dBm. Nenhum receptor real reporta zero.
+   *
+   * O quadro segue válido: banda, frequência e potência continuam sendo
+   * informação boa. O que não existe é a medida.
+   */
+  const measured = rawRssi < 0;
 
   return {
     node: kv.role ?? '',
@@ -228,9 +250,12 @@ export function parseTelemetry(line: string): RadioState | null {
     bw: num('bw') ?? 0,
     cr: 0,
     power: num('pwr') ?? 0,
-    rssi: num('rssi'),
-    snr: num('snr'),
-    lq: num('lq'),
+    // Os três saem do mesmo onFrame no firmware: sem quadro recebido, nenhum
+    // deles é medida. Anular só o RSSI deixaria "SNR 0 dB" na tela, que mente
+    // igual.
+    rssi: measured ? rawRssi : undefined,
+    snr: measured ? num('snr') : undefined,
+    lq: measured ? num('lq') : undefined,
     linked: kv.link === '1',
     radioOk: true,
   };
