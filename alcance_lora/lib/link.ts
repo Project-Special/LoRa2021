@@ -57,6 +57,43 @@ export function linkLevel(i: LinkInput): LinkLevel {
   return i.live.linked ? 'ok' : 'down';
 }
 
+/**
+ * Estado da PLACA — que é uma pergunta diferente do enlace.
+ *
+ * "O app está falando com a placa?" e "a placa está falando com a outra placa?"
+ * têm causas e ações opostas: uma se resolve no cabo, a outra andando de volta
+ * para perto do transmissor. Colapsei as duas por um tempo, e o efeito foi a
+ * fita da placa ficar VERMELHA dizendo "sem enlace LoRa" com o cabo perfeito e
+ * telemetria chegando a 1 Hz — o que se lê como defeito de hardware.
+ *
+ * Aqui o enlace é DETALHE, não veredito: a placa está bem se a telemetria
+ * chega, e o que ela conta sobre o rádio vai escrito ao lado. Quem responde
+ * pelo enlace é o LED e a cor do rastro, via linkLevel().
+ */
+export type SerialLevel = 'ok' | 'wait' | 'bad' | 'idle';
+
+export function serialLevel(i: LinkInput): SerialLevel {
+  if (!i.recording) return 'idle';
+  if (!i.serialConnected) return 'bad';
+  // Porta aberta e nada chegando não é o mesmo que porta fechada: aqui a placa
+  // existe e é ela que está muda, ou noutro baud.
+  if (!i.live || i.telemetryAgeMs > LINK_STALE_MS) return 'wait';
+  return 'ok';
+}
+
+export function serialReason(i: LinkInput): string {
+  if (!i.recording) return i.idleDetail || 'parado';
+  if (!i.serialConnected) return 'sem cabo — verifique o OTG';
+  if (!i.live) return 'aguardando telemetria';
+  if (i.telemetryAgeMs > LINK_STALE_MS) {
+    return `muda há ${Math.round(i.telemetryAgeMs / 1000)} s`;
+  }
+  // Telemetria viva: diz o que a placa está reportando, enlace incluído — mas
+  // como informação, não como alarme.
+  const rssi = i.live.rssi == null ? '—' : i.live.rssi;
+  return `${i.live.band} · ${rssi} dBm · ${i.live.linked ? 'enlace' : 'sem enlace'}`;
+}
+
 /** Por que o LED está nessa cor. É o que diz o que fazer a seguir. */
 export function linkReason(i: LinkInput): string {
   if (!i.recording) return i.idleDetail || 'parado';

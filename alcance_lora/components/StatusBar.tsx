@@ -1,7 +1,7 @@
 import React from 'react';
 import { Fix } from '../services/GeoService';
 import { RadioState } from '../types';
-import { linkLevel, linkReason } from '../lib/link';
+import { serialLevel, serialReason } from '../lib/link';
 import { CloudState } from '../hooks/useRangeSession';
 
 /**
@@ -74,9 +74,9 @@ export const StatusBar: React.FC<Props> = (p) => {
     gpsDetail = 'parado — inicie a campanha';
   }
 
-  // O chip da placa lê a MESMA regra do LED e do rastro (lib/link). Ele tinha a
-  // sua própria, e o resultado era a barra dizendo amarelo — "quase" — sobre um
-  // ponto que o mapa já tinha pintado de vermelho.
+  // Esta fita responde pela PLACA, não pelo enlace de rádio — ver serialLevel
+  // em lib/link. O enlace aparece aqui como detalhe escrito; quem o julga com
+  // cor é o LED de LoRa, logo acima.
   const link = {
     recording: p.recording,
     serialConnected: p.serialConnected,
@@ -84,10 +84,10 @@ export const StatusBar: React.FC<Props> = (p) => {
     telemetryAgeMs: p.telemetryAgeMs,
     idleDetail: p.usbInfo,
   };
-  const lvl = linkLevel(link);
+  const lvl = serialLevel(link);
   const serLevel: Level =
-    lvl === 'ok' ? 'ok' : lvl === 'idle' ? (p.usbPresent ? 'ok' : 'wait') : 'bad';
-  const serDetail = linkReason(link);
+    lvl === 'ok' ? 'ok' : lvl === 'bad' ? 'bad' : lvl === 'idle' && p.usbPresent ? 'ok' : 'wait';
+  const serDetail = serialReason(link);
 
   // A nuvem é a terceira fonte, e merece o mesmo tratamento das outras duas:
   // "os pontos estão salvos fora do aparelho?" é uma pergunta que só se lembra
