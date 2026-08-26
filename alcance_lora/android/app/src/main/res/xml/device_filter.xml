@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Conversores USB-serial que aparecem nas placas deste projeto.
+
+  Sem esta lista o Android nao liga o cabo ao app: a permissao teria de ser
+  concedida manualmente a cada conexao, o que em campo e um estorvo.
+
+  vendor-id / product-id em DECIMAL, que e como o Android le.
+-->
+<resources>
+    <!-- WCH CH340 / CH341 (0x1A86 / 0x7523) — DevKit v1 -->
+    <usb-device vendor-id="6790" product-id="29987" />
+    <!-- WCH CH9102 (0x1A86 / 0x55D4) — placa do receptor -->
+    <usb-device vendor-id="6790" product-id="21972" />
+    <!-- Silicon Labs CP210x (0x10C4 / 0xEA60) -->
+    <usb-device vendor-id="4292" product-id="60000" />
+    <!-- FTDI FT232 (0x0403 / 0x6001) -->
+    <usb-device vendor-id="1027" product-id="24577" />
+    <!-- Espressif USB-CDC nativo do ESP32-S3 (0x303A / 0x1001) -->
+    <usb-device vendor-id="12346" product-id="4097" />
+</resources>

@@ -1,0 +1,8 @@
+{
+  "name": "LoraLink",
+  "version": "2.0.0",
+  "description": "Camada de enlace sobre o LR2021, usando o driver proprio LR2021Chip",
+  "dependencies": {
+    "LR2021": "*"
+  }
+}

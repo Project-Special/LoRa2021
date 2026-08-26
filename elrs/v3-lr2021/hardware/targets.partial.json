@@ -1,0 +1,71 @@
+{
+    "lora2021": {
+        "name": "LoRa2021 (proto)",
+        "tx_dual": {
+            "esp32": {
+                "product_name": "LoRa2021 ESP32 TX",
+                "lua_name": "LoRa2021 TX",
+                "layout_file": "LoRa2021 ESP32 classic.json",
+                "upload_methods": [
+                    "uart",
+                    "wifi"
+                ],
+                "min_version": "3.6.0",
+                "platform": "esp32",
+                "firmware": "LoRa2021_TX"
+            },
+            "esp32-gemini": {
+                "product_name": "LoRa2021 ESP32 TX Gemini (2 modulos)",
+                "lua_name": "LoRa2021 GemX",
+                "layout_file": "LoRa2021 ESP32 Gemini.json",
+                "upload_methods": [
+                    "uart",
+                    "wifi"
+                ],
+                "min_version": "3.6.0",
+                "platform": "esp32",
+                "firmware": "LoRa2021_TX"
+            },
+            "esp32s3": {
+                "product_name": "LoRa2021 ESP32-S3 TX",
+                "lua_name": "LoRa2021 S3 TX",
+                "layout_file": "LoRa2021 ESP32-S3.json",
+                "upload_methods": [
+                    "uart",
+                    "wifi"
+                ],
+                "min_version": "3.6.0",
+                "platform": "esp32-s3",
+                "firmware": "LoRa2021_S3_TX"
+            }
+        },
+        "rx_dual": {
+            "esp32": {
+                "product_name": "LoRa2021 ESP32 RX",
+                "lua_name": "LoRa2021 RX",
+                "layout_file": "LoRa2021 ESP32 classic.json",
+                "upload_methods": [
+                    "uart",
+                    "wifi",
+                    "betaflight"
+                ],
+                "min_version": "3.6.0",
+                "platform": "esp32",
+                "firmware": "LoRa2021_RX"
+            },
+            "esp32s3": {
+                "product_name": "LoRa2021 ESP32-S3 RX",
+                "lua_name": "LoRa2021 S3 RX",
+                "layout_file": "LoRa2021 ESP32-S3.json",
+                "upload_methods": [
+                    "uart",
+                    "wifi",
+                    "betaflight"
+                ],
+                "min_version": "3.6.0",
+                "platform": "esp32-s3",
+                "firmware": "LoRa2021_S3_RX"
+            }
+        }
+    }
+}

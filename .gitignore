@@ -1,0 +1,13 @@
+.pio/
+.vscode/
+*.pyc
+__pycache__/
+
+# clones do ExpressLRS - recriados por elrs/setup_hardware.py
+elrs/ExpressLRS/
+elrs/ExpressLRS-v3/
+
+# Dados de campo: tracados de GPS reais e backups do aparelho. Nao sao fonte,
+# e publicar coordenada de deslocamento e decisao de quem caminhou — nao um
+# efeito colateral de versionar o projeto.
+campanhas/

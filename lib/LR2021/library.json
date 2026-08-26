@@ -1,0 +1,7 @@
+{
+  "name": "LR2021",
+  "version": "1.0.0",
+  "description": "Driver do Semtech LR2021 escrito sobre os comandos do fabricante",
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}

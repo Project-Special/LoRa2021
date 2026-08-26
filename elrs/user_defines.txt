@@ -1,0 +1,34 @@
+### user_defines.txt do protótipo LoRa2021 ###
+# Copiado para ExpressLRS/src/user_defines.txt por setup_hardware.py.
+# Edite AQUI, não no clone (o clone é descartável).
+
+### BINDING PHRASE ###
+# Deixe comentado para usar bind tradicional; ou passe --phrase no
+# binary_configurator, que sobrescreve o binário depois do build.
+#-DMY_BINDING_PHRASE="troque isso"
+
+
+### REGULATORY DOMAIN ###
+# Obrigatório: o LR2021 é tratado como rádio sub-GHz pelo ELRS.
+# Brasil: 902-907,5 / 915-928 MHz -> AU_915 (ou FCC_915).
+# O lado 2.4 GHz usa ISM_2400 por padrão.
+-DRegulatory_Domain_AU_915
+#-DRegulatory_Domain_FCC_915
+#-DRegulatory_Domain_EU_868
+
+
+### PERFORMANCE ###
+-DLOCK_ON_FIRST_CONNECTION
+
+
+### OUTROS ###
+-DAUTO_WIFI_ON_INTERVAL=60
+
+
+### DEBUG ###
+# Ligado durante o bring-up: o LR2021Driver loga cada comando SPI que falha
+# (CHECK("LR2021_...")), o que é o jeito mais rápido de descobrir pinagem
+# errada, TCXO errado ou DCDC indevido.
+-DDEBUG_LOG
+#-DDEBUG_LOG_VERBOSE
+#-DDEBUG_RX_SCOREBOARD

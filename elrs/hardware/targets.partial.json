@@ -1,0 +1,34 @@
+{
+    "lora2021": {
+        "name": "LoRa2021 (proto)",
+        "tx_dual": {
+            "esp32": {
+                "product_name": "LoRa2021 ESP32 dual-band TX",
+                "lua_name": "LoRa2021 TX",
+                "layout_file": "LoRa2021 ESP32.json",
+                "upload_methods": [
+                    "uart",
+                    "wifi"
+                ],
+                "min_version": "4.2.0",
+                "platform": "esp32",
+                "firmware": "Unified_ESP32_LR2021_TX"
+            }
+        },
+        "rx_dual": {
+            "esp32": {
+                "product_name": "LoRa2021 ESP32 dual-band RX",
+                "lua_name": "LoRa2021 RX",
+                "layout_file": "LoRa2021 ESP32.json",
+                "upload_methods": [
+                    "uart",
+                    "wifi",
+                    "betaflight"
+                ],
+                "min_version": "4.2.0",
+                "platform": "esp32",
+                "firmware": "Unified_ESP32_LR2021_RX"
+            }
+        }
+    }
+}

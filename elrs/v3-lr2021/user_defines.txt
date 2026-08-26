@@ -1,0 +1,31 @@
+### user_defines.txt — LoRa2021 sobre ExpressLRS 3.6.4 ###
+# Copiado para ExpressLRS-v3/src/user_defines.txt por apply_overlay.py.
+# Edite AQUI, não no clone (o clone é descartável).
+
+### BINDING PHRASE ###
+# Deixe comentado para usar bind tradicional; ou passe --phrase no
+# binary_configurator, que grava no binário depois do build.
+# Para parear com o IHM, use a MESMA frase que está no layout dele.
+#-DMY_BINDING_PHRASE="Paulo_Palaoro"
+
+
+### REGULATORY DOMAIN ###
+# Obrigatório: o LR2021 é tratado como rádio sub-GHz (banda primária).
+# Brasil: 902-907,5 / 915-928 MHz -> AU_915.
+# O lado 2.4 GHz usa ISM2G4 automaticamente (tabela domainsDualBand).
+-DRegulatory_Domain_AU_915
+#-DRegulatory_Domain_FCC_915
+#-DRegulatory_Domain_EU_868
+
+
+### PERFORMANCE ###
+-DLOCK_ON_FIRST_CONNECTION
+
+
+### OUTROS ###
+-DAUTO_WIFI_ON_INTERVAL=60
+
+
+### DEBUG ###
+-DDEBUG_LOG
+#-DDEBUG_LOG_VERBOSE

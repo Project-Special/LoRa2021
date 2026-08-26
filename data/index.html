@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-band="915">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>LoRa2021 · painel</title>
+<!-- caminho RELATIVO de propósito: no ESP32 a página é servida da raiz do
+     LittleFS, mas no preview local ela abre em /data/. Relativo serve aos dois. -->
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="device">
+
+  <!-- ═══════════════════════════════════════════════════════ chassi ═════ -->
+  <header class="chassis">
+    <i class="screw screw--tl" aria-hidden="true"></i>
+    <i class="screw screw--tr" aria-hidden="true"></i>
+
+    <div class="chassis__id">
+      <h1 class="etch">LoRa<span>2021</span></h1>
+      <p class="silk">SEMTECH LR2021 · SUB-GHZ / S-BAND / 2G4 · BENCH UNIT</p>
+    </div>
+
+    <div class="chassis__meta">
+      <div class="plate">
+        <label>NODE</label>
+        <output id="node">····</output>
+      </div>
+      <div class="plate plate--link" id="link" data-state="off">
+        <label>ENLACE</label>
+        <output><span class="lamp"></span><span id="linkTxt">AUSENTE</span></output>
+      </div>
+    </div>
+  </header>
+
+  <!-- rádio fora: o painel continua no ar de propósito, pra servir de
+       diagnóstico em vez de a placa ficar muda -->
+  <p class="warn warn--top" id="radioWarn" hidden>
+    <b>Rádio não inicializou</b> — <span id="radioErr">·</span>.
+    Verifique 3V3, fiação SPI, NRST/BUSY, a tensão do TCXO e qual DIO do módulo
+    está no pino de interrupção.
+  </p>
+
+  <!-- ═══════════════════════════════════════════════════════ abas ══════ -->
+  <!-- Duas leituras diferentes da mesma bancada: o que o radio esta fazendo
+       AGORA, e o que as campanhas ja mediram. Separadas por aba porque a
+       segunda so existe com internet — no AP da placa nao ha rota para o
+       banco, e misturar as duas deixaria metade do painel morta sem explicar
+       por que. -->
+  <nav class="tabs" role="tablist">
+    <button class="tabs__b" id="tabBench" role="tab" aria-selected="true">Bancada</button>
+    <button class="tabs__b" id="tabDb" role="tab" aria-selected="false">Banco de dados</button>
+  </nav>
+
+  <!-- A tela, os controles e o registro sao a MESMA vista: todos falam do
+       radio agora. Ficam juntos num container so para a aba trocar os tres de
+       uma vez — antes a barra ficava abaixo do grafico, e para achar a aba do
+       mapa era preciso rolar por todo o painel de bancada. -->
+  <div id="viewBench">
+
+  <!-- ═══════════════════════════════════════════════════════ tela ═══════ -->
+  <section class="screen">
+    <!-- vinheta ABAIXO do conteúdo: acima dela escurecia os contadores de
+         forma desigual, apagando justo os das pontas. O reflexo do vidro,
+         esse sim, fica por cima. -->
+    <div class="screen__vign" aria-hidden="true"></div>
+    <div class="screen__gloss" aria-hidden="true"></div>
+    <div class="screen__sweep" aria-hidden="true"></div>
+
+    <div class="screen__top">
+
+      <!-- ponteiro -->
+      <figure class="smeter">
+        <!-- folga lateral generosa: com os rótulos por fora do arco e o de
+             -130 ancorado pela direita, um box mais justo cortava o sinal -->
+        <svg viewBox="-28 -6 296 152" role="img" aria-label="Medidor de sinal">
+          <defs>
+            <linearGradient id="arcG" x1="0" x2="1">
+              <stop offset="0"   stop-color="var(--bad)"/>
+              <stop offset=".45" stop-color="var(--warn)"/>
+              <stop offset="1"   stop-color="var(--glow)"/>
+            </linearGradient>
+          </defs>
+          <!-- a escala impressa é que carrega o gradiente; o preenchido é
+               sólido no acento. Antes o arco começava sempre em vermelho e
+               gritava alarme mesmo com sinal ótimo. -->
+          <path class="smeter__track" d="M32 124 A 88 88 0 0 1 208 124"/>
+          <path class="smeter__arc" id="arc" d="M32 124 A 88 88 0 0 1 208 124"/>
+          <g class="smeter__ticks" id="ticks"></g>
+          <g class="smeter__needle" id="needle">
+            <line class="smeter__tail" x1="120" y1="124" x2="120" y2="139"/>
+            <polygon points="117.2,124 120,44 122.8,124"/>
+            <circle class="smeter__hub" cx="120" cy="124" r="5"/>
+            <circle class="smeter__pin" cx="120" cy="124" r="1.6"/>
+          </g>
+        </svg>
+      </figure>
+
+      <!-- leitura numérica -->
+      <div class="digits">
+        <div class="digits__main">
+          <output id="rssi">–––.–</output>
+          <span class="digits__u">dBm</span>
+        </div>
+        <div class="digits__sub">
+          <span><i>SNR</i><b id="snr">––.–</b>dB</span>
+          <span><i>TOA</i><b id="toa">–––</b>ms</span>
+        </div>
+      </div>
+
+      <!-- contadores: ocupam o vazio que sobrava no alto à direita -->
+      <dl class="counters">
+        <div><dt>Enviados</dt><dd id="tx">0</dd></div>
+        <div><dt>Recebidos</dt><dd id="rx">0</dd></div>
+        <div><dt>CRC ruim</dt><dd id="err">0</dd></div>
+        <div><dt>Ida e volta</dt><dd><span id="rtt">–</span><i>ms</i></dd></div>
+      </dl>
+
+    </div>
+
+    <!-- histórico -->
+    <div class="chart">
+      <canvas id="chart"></canvas>
+      <span class="chart__cap">RSSI · janela de 90 s</span>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════ controles ══ -->
+  <div class="deck">
+
+    <section class="panel" style="--d:1">
+      <h2 class="panel__t">Banda</h2>
+      <div class="seg seg--four" id="bands" role="group" aria-label="Banda"></div>
+      <p class="note" id="bandNote">·</p>
+
+      <dl class="spec">
+        <div><dt>Plano</dt><dd id="bandName">·</dd></div>
+        <div><dt>Caminho de RF</dt><dd id="pathNote">·</dd></div>
+        <div><dt>Teto do PA</dt><dd id="paCeil">·</dd></div>
+      </dl>
+
+      <h3 class="panel__sub">Par de teste<i>o outro lado</i></h3>
+      <div class="field">
+        <select id="peer"></select>
+      </div>
+      <p class="silk silk--p" id="peerNote">·</p>
+      <p class="warn" id="peerWarn" hidden>
+        <b>Modo escuta.</b> Este firmware é a bancada: fala LoRa cru e
+        <b>não decodifica ExpressLRS</b>. O contador <b>CRC ruim</b> subindo já
+        prova que o transmissor é audível — decodificar exige gravar o firmware
+        ExpressLRS (<code>LoRa2021_S3_RX</code>).
+      </p>
+
+      <h3 class="panel__sub">Binding ExpressLRS<i>frase</i></h3>
+      <div class="field">
+        <input id="phrase" type="text" maxlength="63"
+               placeholder="frase do transmissor" spellcheck="false">
+        <button class="btn btn--ghost" id="phraseSave">Gravar</button>
+      </div>
+      <p class="silk silk--p">
+        UID <b id="uid">·</b> &middot; IQ <b id="iq">·</b>
+      </p>
+
+      <h3 class="panel__sub">Hardware<i>porta ANT</i></h3>
+      <!-- select em vez de botões de propósito: com três grades iguais de
+           150/433/470/868/915 na mesma tela, o usuário não distinguia o que
+           era ajuste de rádio do que era declaração de como a placa está
+           montada. Esta é ajuste-uma-vez, então perde destaque. -->
+      <div class="field field--inline">
+        <label for="match">Rede de casamento<i>solda</i></label>
+        <select id="match" class="sel--slim"></select>
+      </div>
+      <p class="warn" id="matchWarn" hidden>
+        A frequência sintonizada está fora desta rede. O rádio transmite, mas
+        com VSWR alto — alcance ruim e estresse no PA.
+      </p>
+    </section>
+
+    <section class="panel" style="--d:2">
+      <h2 class="panel__t">Modem</h2>
+
+      <div class="duo">
+        <div class="field">
+          <label for="freq">Frequência<i>MHz</i></label>
+          <input id="freq" type="number" step="0.001" inputmode="decimal">
+        </div>
+        <div class="field">
+          <label for="power">Potência<i>dBm</i></label>
+          <input id="power" type="number" step="1">
+        </div>
+      </div>
+      <p class="hint" id="powerHint">·</p>
+
+      <div class="trio">
+        <div class="field">
+          <label for="sf">SF</label>
+          <select id="sf"></select>
+        </div>
+        <div class="field">
+          <label for="bw">BW<i>kHz</i></label>
+          <select id="bw"></select>
+        </div>
+        <div class="field">
+          <label for="cr">CR<i>4/N</i></label>
+          <select id="cr"></select>
+        </div>
+      </div>
+
+      <button class="btn btn--go" id="apply">Aplicar</button>
+    </section>
+
+    <section class="panel" style="--d:3">
+      <h2 class="panel__t">Tráfego</h2>
+
+      <div class="field">
+        <label for="msg">Mensagem</label>
+        <input id="msg" type="text" maxlength="180" placeholder="texto livre">
+      </div>
+      <div class="row">
+        <button class="btn" id="send">Enviar</button>
+        <button class="btn" id="ping">Ping</button>
+      </div>
+
+      <div class="field field--inline">
+        <label for="beacon">Beacon automático</label>
+        <input id="beacon" type="checkbox" class="sw">
+      </div>
+      <div class="field">
+        <label for="interval">Intervalo<i>ms</i></label>
+        <input id="interval" type="number" step="100" min="200">
+      </div>
+    </section>
+
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════ registro ═══ -->
+  <section class="panel panel--log" style="--d:4">
+    <h2 class="panel__t">Registro<button class="btn btn--ghost" id="clear">limpar</button></h2>
+    <ol class="log" id="log" aria-live="polite"></ol>
+  </section>
+
+  </div><!-- /viewBench -->
+
+  <!-- ═══════════════════════════════════════════════════════ banco ═════ -->
+  <section class="panel panel--db" id="viewDb" hidden>
+    <h2 class="panel__t">Campanhas<button class="btn btn--ghost" id="dbReload">recarregar</button></h2>
+    <p class="note" id="dbNote">·</p>
+
+    <!-- Credenciais pedidas na hora, nunca guardadas no repositorio.
+         A pagina e publica: qualquer chave versionada aqui viraria publica
+         junto. Pedir ao abrir tem o efeito lateral util de a mesma pagina
+         servir a qualquer projeto Supabase, nao so ao desta bancada. -->
+    <div class="db__auth" id="dbAuth" hidden>
+      <p class="silk silk--p">
+        Informe o projeto Supabase para ler as campanhas. Os valores ficam
+        <b>somente neste navegador</b> e não são enviados a lugar nenhum além do
+        seu próprio banco.
+      </p>
+      <div class="field">
+        <label for="sbUrl">URL do projeto<i>https://xxxx.supabase.co</i></label>
+        <input id="sbUrl" type="url" spellcheck="false" placeholder="https://xxxx.supabase.co">
+      </div>
+      <div class="field">
+        <label for="sbKey">Anon key<i>Project Settings → API → anon public</i></label>
+        <input id="sbKey" type="password" spellcheck="false" placeholder="eyJhbGciOi…">
+      </div>
+      <button class="btn btn--go" id="sbSave" type="button">Conectar</button>
+    </div>
+
+    <p class="silk silk--p db__who" id="dbWho" hidden>
+      Conectado a <b id="dbHost">·</b>
+      <button class="btn btn--ghost" id="sbForget" type="button">trocar / esquecer</button>
+    </p>
+
+    <div class="db">
+      <ol class="db__list" id="dbList"></ol>
+
+      <div class="db__main">
+        <!-- O mapa mora num invólucro, e não solto: em tela cheia quem muda de
+             posição é o invólucro, e o div do Leaflet continua sendo o mesmo
+             elemento. Recriar o mapa ao expandir perderia o enquadramento e
+             recarregaria todos os tiles. -->
+        <div class="db__mapwrap" id="dbMapWrap">
+          <div class="db__map" id="dbMap"></div>
+          <button class="db__full" id="dbFull" type="button">⤢ tela cheia</button>
+        </div>
+
+        <dl class="db__stats" id="dbStats" hidden>
+          <div><dt>Pontos</dt><dd id="dbPts">·</dd></div>
+          <div><dt>Alcance</dt><dd id="dbReach">·</dd></div>
+          <div><dt>Sem enlace</dt><dd id="dbLost">·</dd></div>
+          <div><dt>Melhor RSSI</dt><dd id="dbBest">·</dd></div>
+          <div><dt>Pior RSSI</dt><dd id="dbWorst">·</dd></div>
+          <div><dt>Sem RSSI</dt><dd id="dbNoRssi">·</dd></div>
+        </dl>
+
+        <div class="db__tablewrap">
+          <table class="db__table">
+            <thead>
+              <tr>
+                <th>hora</th><th>latitude</th><th>longitude</th><th>alt</th>
+                <th>± m</th><th>dist</th><th>RSSI</th><th>SNR</th><th>LQ</th><th>enlace</th>
+              </tr>
+            </thead>
+            <tbody id="dbRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="feet">
+    <i class="screw screw--bl" aria-hidden="true"></i>
+    <i class="screw screw--br" aria-hidden="true"></i>
+    <span class="silk">PROTÓTIPO · NÃO CERTIFICADO · USO EM BANCADA</span>
+  </footer>
+
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

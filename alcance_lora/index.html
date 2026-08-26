@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Alcance LoRa</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            primary: "#137fec",
+            "primary-dark": "#0f66be",
+            "background-light": "#f6f7f8",
+            "background-dark": "#101922",
+            success: "#34C759",
+            warning: "#FFCC00",
+            danger: "#FF3B30",
+          },
+          fontFamily: { display: ["Space Grotesk", "sans-serif"] },
+        },
+      },
+    };
+  </script>
+</head>
+<body class="bg-background-dark text-white font-display overflow-x-hidden" style="padding-bottom: env(safe-area-inset-bottom); padding-top: env(safe-area-inset-top);">
+  <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>

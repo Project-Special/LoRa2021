@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Alcance LoRa</string>
+    <string name="title_activity_main">Alcance LoRa</string>
+    <string name="package_name">br.com.alfatronic.alcancelora</string>
+    <string name="custom_url_scheme">br.com.alfatronic.alcancelora</string>
+</resources>

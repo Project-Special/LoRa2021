@@ -1,0 +1,44 @@
+{
+    "serial_rx": 3,
+    "serial_tx": 1,
+    "radio_miso": 27,
+    "radio_mosi": 13,
+    "radio_sck": 14,
+    "radio_busy": 33,
+    "radio_dio1": 32,
+    "radio_nss": 26,
+    "radio_rst": 25,
+    "radio_rfsw_ctrl": [
+        0,
+        0,
+        0,
+        0,
+        255,
+        0,
+        0
+    ],
+    "_comentario_tcxo": "modulo sem TCXO (medido): campo radio_tcxo ausente de proposito",
+    "_comentario_pinos": "ESP32-WROOM-32 DevKit v1: D13..D32 em fila, D12 pulado (strapping MTDI)",
+    "radio_dcdc": false,
+    "power_min": 0,
+    "power_high": 3,
+    "power_max": 3,
+    "power_default": 0,
+    "power_control": 0,
+    "power_values": [
+        20,
+        28,
+        34,
+        40
+    ],
+    "power_values_dual": [
+        16,
+        20,
+        22,
+        24
+    ],
+    "power_lna_gain": 12,
+    "led": 2,
+    "screen_type": 0,
+    "use_backpack": false
+}

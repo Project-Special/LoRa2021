@@ -1,0 +1,497 @@
+/* =============================================================================
+   LoRa2021 — monitor serial (Web Serial API)
+   Mesma materialidade do painel de bordo em data/: a área de leitura é VIDRO
+   e o resto é CHAPA. O acento é RACIONADO — só o número vivo, a barra de LQ,
+   as barras de canal e a lâmpada de enlace o carregam.
+   Sem webfont, sem CDN, sem framework: a página abre offline.
+   ========================================================================== */
+
+:root {
+  --mono: ui-monospace, "SFMono-Regular", "SF Mono", "JetBrains Mono",
+          "IBM Plex Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+
+  --pad: 20px;
+
+  --room:     #070908;
+  --metal:    #191d1b;
+  --metal-hi: #232927;
+  --metal-lo: #101413;
+  --glass:    #050706;
+  --rule:     #2b332f;
+  --rule-hi:  #ffffff14;
+
+  --ink:      #dbe5df;
+  --ink-dim:  #9aaaa3;
+  --ink-far:  #8a9a93;
+  --silk:     #8d9d96;
+
+  --bad:      #ff4f70;
+  --warn:     #ffb03a;
+
+  --glow:     #4fe3e8;
+  --glow-2:   #4fe3e822;
+  --glow-4:   #4fe3e844;
+
+  --t-micro: 10px;
+  --t-body:  13px;
+  --t-val:   17px;
+  --t-big:   22px;
+}
+
+/* o acento segue o estado do enlace: sem link não há por que brilhar em ciano */
+body[data-link="off"]  { --glow:#7c8c86; --glow-2:#7c8c8622; --glow-4:#7c8c8644; }
+body[data-link="weak"] { --glow:#ffab3d; --glow-2:#ffab3d22; --glow-4:#ffab3d44; }
+body[data-link="good"] { --glow:#4fe3e8; --glow-2:#4fe3e822; --glow-4:#4fe3e844; }
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: clamp(10px, 2.5vw, 34px);
+  background:
+    radial-gradient(90% 60% at 50% 0%, #121917 0%, var(--room) 70%),
+    var(--room);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: var(--t-body);
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* ═══════════════════════════════════════════════════════════════ aparelho */
+
+.device {
+  position: relative;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: var(--pad);
+  border-radius: 6px;
+  border: 1px solid #000;
+  background:
+    repeating-linear-gradient(90deg, #ffffff09 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(90deg, #00000018 0 2px, transparent 2px 9px),
+    linear-gradient(180deg, var(--metal-hi), var(--metal) 40%, var(--metal-lo));
+  box-shadow:
+    inset 0 1px 0 var(--rule-hi),
+    inset 0 -1px 0 #0008,
+    0 30px 60px -20px #000c;
+}
+
+.screw {
+  position: absolute;
+  width: 11px; height: 11px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #4a544f, #1b201e 70%);
+  box-shadow: inset 0 1px 1px #ffffff22, 0 1px 2px #000a;
+}
+.screw::after {
+  content: "";
+  position: absolute; inset: 0;
+  margin: auto;
+  width: 7px; height: 1px;
+  background: #0009;
+  transform: rotate(32deg);
+}
+.screw--tl { top: 9px;    left: 9px; }
+.screw--tr { top: 9px;    right: 9px; }
+.screw--bl { bottom: 9px; left: 9px; }
+.screw--br { bottom: 9px; right: 9px; }
+
+/* ═══════════════════════════════════════════════════════════════ cabeçalho */
+
+.chassis {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px 24px;
+  padding: 6px 0 16px;
+  border-bottom: 1px solid var(--rule);
+  box-shadow: 0 1px 0 var(--rule-hi);
+}
+
+/* fica com a sobra quando os dois blocos do chassi cabem na mesma linha */
+.chassis__id { flex: 1 1 auto; min-width: 0; }
+
+.etch {
+  margin: 0;
+  font-size: clamp(22px, 3.6vw, 32px);
+  font-weight: 700;
+  letter-spacing: .08em;
+  line-height: 1;
+  color: #c9d4ce;
+  text-shadow: 0 -1px 1px #000, 0 1px 0 #ffffff1c;
+}
+.etch span { color: var(--glow); text-shadow: 0 0 22px var(--glow-4); }
+
+.silk {
+  margin: 8px 0 0;
+  font-size: var(--t-micro);
+  letter-spacing: .18em;
+  color: var(--silk);
+}
+
+.chassis__meta { display: flex; flex-wrap: wrap; gap: 10px; }
+
+.plate {
+  min-width: 104px;
+  padding: 7px 11px;
+  border-radius: 3px;
+  border: 1px solid #000;
+  background: linear-gradient(180deg, #0d1110, #070a09);
+  box-shadow: inset 0 1px 0 #ffffff10;
+}
+.plate label {
+  display: block;
+  font-size: var(--t-micro);
+  letter-spacing: .16em;
+  color: var(--ink-far);
+}
+.plate output {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 3px;
+  font-size: var(--t-body);
+  color: var(--ink);
+}
+
+.lamp {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #2a3230;
+  box-shadow: inset 0 0 2px #000;
+}
+.plate--link[data-state="on"] .lamp {
+  background: var(--glow);
+  box-shadow: 0 0 9px var(--glow), inset 0 0 2px #0006;
+}
+.plate--link[data-state="warn"] .lamp {
+  background: var(--warn);
+  box-shadow: 0 0 9px var(--warn);
+}
+
+/* ═══════════════════════════════════════════════════════════════ avisos */
+
+.warn {
+  margin: 14px 0 0;
+  padding: 11px 13px;
+  border-radius: 3px;
+  border: 1px solid #6b2436;
+  border-left: 3px solid var(--bad);
+  background: #2a0f18;
+  color: #ffd9e0;
+  font-size: var(--t-body);
+}
+.warn code {
+  padding: 1px 5px;
+  border-radius: 2px;
+  background: #00000055;
+  color: #ffeaef;
+}
+
+/* ═══════════════════════════════════════════════════════════════ controles */
+
+.rack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 26px;
+  padding: 16px 0;
+}
+
+.ctl__lb {
+  display: block;
+  margin-bottom: 6px;
+  font-size: var(--t-micro);
+  letter-spacing: .16em;
+  color: var(--ink-far);
+}
+.ctl__row { display: flex; flex-wrap: wrap; gap: 8px; }
+
+select, .btn, .prompt input {
+  font-family: var(--mono);
+  font-size: var(--t-body);
+  color: var(--ink);
+  border-radius: 3px;
+  border: 1px solid #000;
+  background: linear-gradient(180deg, #2a312e, #1a201e);
+  box-shadow: inset 0 1px 0 #ffffff18, 0 1px 2px #0007;
+}
+
+select { padding: 7px 10px; }
+
+.btn {
+  padding: 7px 15px;
+  letter-spacing: .1em;
+  cursor: pointer;
+  transition: filter .12s, transform .06s;
+}
+.btn:hover:not(:disabled) { filter: brightness(1.25); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled { opacity: .38; cursor: not-allowed; }
+
+.btn--go {
+  border-color: #0a2a2b;
+  background: linear-gradient(180deg, #1d4b4d, #123234);
+  color: #d8fbfc;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  color: var(--ink-dim);
+  cursor: pointer;
+  user-select: none;
+}
+.check input { accent-color: var(--glow); width: 15px; height: 15px; cursor: pointer; }
+.check:hover { color: var(--ink); }
+
+/* foco visível: o teclado precisa enxergar onde está */
+select:focus-visible, .btn:focus-visible, .prompt input:focus-visible {
+  outline: 2px solid var(--glow);
+  outline-offset: 2px;
+}
+
+/* ═══════════════════════════════════════════════════════════════ tela */
+
+.screen {
+  position: relative;
+  min-height: 340px;
+  padding: 18px;
+  border-radius: 4px;
+  border: 1px solid #000;
+  background:
+    radial-gradient(120% 100% at 50% 0%, #0a0f0d 0%, var(--glass) 70%),
+    var(--glass);
+  box-shadow:
+    inset 0 0 0 1px #ffffff0a,
+    inset 0 12px 34px -18px #000,
+    0 2px 0 #ffffff0c;
+  overflow: hidden;
+}
+
+/* vinheta ABAIXO do conteúdo; o reflexo do vidro, por cima e inerte */
+.screen__vign {
+  position: absolute; inset: 0;
+  background: radial-gradient(120% 90% at 50% 45%, transparent 55%, #000a 100%);
+  pointer-events: none;
+}
+.screen__gloss {
+  position: absolute; inset: 0;
+  background: linear-gradient(172deg, #ffffff0b 0 18%, transparent 42%);
+  pointer-events: none;
+  z-index: 3;
+}
+
+.view { position: relative; z-index: 2; }
+
+.view--idle {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  min-height: 300px;
+  text-align: center;
+  color: var(--ink-dim);
+}
+.view--idle .hint {
+  max-width: 62ch;
+  font-size: var(--t-body);
+  color: var(--ink-far);
+  line-height: 1.65;
+}
+.view--idle code {
+  padding: 1px 5px;
+  border-radius: 2px;
+  background: #ffffff10;
+  color: var(--ink-dim);
+}
+.view--idle b { color: var(--ink); }
+
+/* ------------------------------------------------------------- leitura */
+
+.readout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 26px 46px;
+  align-items: flex-start;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #ffffff10;
+}
+
+.gauge { min-width: 300px; flex: 1 1 300px; }
+.gauge__lb {
+  font-size: var(--t-micro);
+  letter-spacing: .18em;
+  color: var(--ink-far);
+}
+.gauge__val {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 2px 0 10px;
+}
+.gauge__val output {
+  font-size: clamp(44px, 8vw, 68px);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--glow);
+  text-shadow: 0 0 26px var(--glow-4);
+  font-variant-numeric: tabular-nums;
+}
+.gauge__val span { font-size: var(--t-val); color: var(--ink-far); }
+
+.meter {
+  height: 10px;
+  border-radius: 2px;
+  background: #0c110f;
+  box-shadow: inset 0 1px 3px #000, inset 0 0 0 1px #ffffff0a;
+  overflow: hidden;
+}
+.meter i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--glow-4), var(--glow));
+  box-shadow: 0 0 12px var(--glow-4);
+  transition: width .18s ease-out;
+}
+
+.digits { display: grid; gap: 9px; min-width: 210px; }
+.digits__row {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+.digits__lb {
+  min-width: 78px;
+  font-size: var(--t-micro);
+  letter-spacing: .16em;
+  color: var(--ink-far);
+}
+.digits__row b {
+  min-width: 62px;
+  text-align: right;
+  font-size: var(--t-val);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.digits__row i { font-style: normal; font-size: var(--t-micro); color: var(--ink-far); }
+
+/* ------------------------------------------------------------- canais */
+
+.chans {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(232px, 1fr));
+  gap: 7px 26px;
+  padding-top: 18px;
+}
+
+.chan { display: flex; align-items: center; gap: 9px; }
+.chan__lb {
+  width: 34px;
+  font-size: var(--t-micro);
+  letter-spacing: .1em;
+  color: var(--ink-far);
+}
+.chan__track {
+  position: relative;
+  flex: 1;
+  height: 7px;
+  border-radius: 2px;
+  background: #0c110f;
+  box-shadow: inset 0 1px 2px #000, inset 0 0 0 1px #ffffff08;
+  overflow: hidden;
+}
+/* marca do centro: sem ela não dá pra ver que um manche está no meio */
+.chan__track::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; left: 50%;
+  width: 1px;
+  background: #ffffff1f;
+}
+.chan__fill {
+  /* span é inline por default, e inline ignora width/height: sem isto a barra
+     recebe a largura certa e nunca aparece. */
+  display: block;
+  height: 100%;
+  background: var(--glow);
+  opacity: .82;
+  transition: width .1s linear;
+}
+.chan__us {
+  width: 52px;
+  text-align: right;
+  font-size: var(--t-body);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim);
+}
+
+/* ------------------------------------------------------------- texto */
+
+.log {
+  margin: 0;
+  height: 340px;
+  overflow-y: auto;
+  padding-right: 8px;
+  font-size: var(--t-body);
+  line-height: 1.55;
+  color: var(--ink-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.log b { color: var(--glow); font-weight: 600; }   /* eco do que foi enviado */
+
+.log::-webkit-scrollbar { width: 9px; }
+.log::-webkit-scrollbar-track { background: #0a0e0d; }
+.log::-webkit-scrollbar-thumb { background: #2b332f; border-radius: 4px; }
+
+.prompt {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #ffffff10;
+}
+.prompt__caret { color: var(--glow); }
+.prompt input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 11px;
+  background: #0b100e;
+  box-shadow: inset 0 1px 3px #000;
+}
+.prompt input::placeholder { color: #5f6d68; }
+
+/* ═══════════════════════════════════════════════════════════════ rodapé */
+
+.tally {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 30px;
+  padding-top: 15px;
+  margin-top: 16px;
+  border-top: 1px solid var(--rule);
+  box-shadow: 0 -1px 0 #00000060;
+}
+.tally span { display: flex; align-items: baseline; gap: 8px; }
+.tally i {
+  font-style: normal;
+  font-size: var(--t-micro);
+  letter-spacing: .16em;
+  color: var(--ink-far);
+}
+.tally b {
+  font-size: var(--t-body);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
