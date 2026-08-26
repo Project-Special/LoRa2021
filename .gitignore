@@ -11,3 +11,7 @@ elrs/ExpressLRS-v3/
 # e publicar coordenada de deslocamento e decisao de quem caminhou — nao um
 # efeito colateral de versionar o projeto.
 campanhas/
+
+# Credenciais do painel nesta maquina. Conveniencia local: a pagina publicada
+# pede as credenciais no proprio formulario, e a placa nao serve este arquivo.
+data/supabase.config.js

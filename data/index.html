@@ -319,6 +319,10 @@
 
 </div>
 
+<!-- Conveniencia local. Ausente na placa e no GitHub Pages, e nesses casos o
+     onerror deixa a falha silenciosa: o painel cai no formulario que pede as
+     credenciais, que e o caminho normal. -->
+<script src="supabase.config.js" onerror="window.SUPABASE_LOCAL=null"></script>
 <script src="app.js"></script>
 </body>
 </html>

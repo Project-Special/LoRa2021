@@ -1024,5 +1024,9 @@ $('sbForget').addEventListener('click', () => {
   dbNote('Credenciais esquecidas neste navegador.');
 });
 
-// Restaura o que ja estiver guardado, antes de qualquer troca de aba.
-sbApply(sbLoad());
+// Restaura antes de qualquer troca de aba.
+//
+// O que foi DIGITADO no formulario tem precedencia sobre o arquivo local: quem
+// trocou a credencial na tela esta corrigindo o arquivo, nao o contrario — e a
+// ordem inversa faria "trocar" nunca pegar nesta maquina.
+sbApply(sbLoad() || window.SUPABASE_LOCAL || null);
