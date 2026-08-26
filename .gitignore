@@ -15,3 +15,7 @@ campanhas/
 # Credenciais do painel nesta maquina. Conveniencia local: a pagina publicada
 # pede as credenciais no proprio formulario, e a placa nao serve este arquivo.
 data/supabase.config.js
+
+# Credenciais em texto puro, para consulta nesta maquina. NUNCA versionar: o
+# repositorio e publico.
+CREDENCIAIS.txt
