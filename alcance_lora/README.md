@@ -24,7 +24,7 @@ escala. No rodapé: alcance útil, ponto mais distante, RSSI atual e contagem.
 
 ## Como os dados chegam
 
-A placa fala **115200 pela USB**. O firmware emite, a cada 5 s e sob o comando
+A placa fala **420000 pela USB** — o mesmo baud do CRSF do ExpressLRS, para não haver duas taxas no projeto. O firmware emite, a cada 5 s e sob o comando
 `tel`, uma linha de telemetria:
 
 ```

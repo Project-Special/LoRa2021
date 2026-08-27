@@ -42,7 +42,7 @@ pra **validar o hardware** antes de qualquer coisa. Sem dependências externas: 
 driver do LR2021 é deste repositório ([lib/LR2021/](lib/LR2021/)) — o porquê está
 mais abaixo. Valida:
 alimentação, SPI, BUSY/NRESET, TCXO e qual DIO é o IRQ. Dois nós iguais fazem
-beacon e ping-pong, com console serial a 115200 pra trocar banda, frequência,
+beacon e ping-pong, com console serial a 420000 pra trocar banda, frequência,
 potência, SF/BW/CR em runtime.
 
 ```bash
@@ -230,7 +230,7 @@ terminal:
 ```bash
 python tools/serial/serve.py          # pagina web  -> http://localhost:8081
 python tools/serial_app.py            # terminal, 420000, porta automatica
-python tools/serial_app.py -b 115200  # terminal, console da bancada
+python tools/serial_app.py            # 420000 serve para as DUAS placas
 python tools/serial_app.py --list     # portas disponiveis
 ```
 
@@ -248,8 +248,10 @@ silêncio é indistinguível de app quebrado. Por isso também o botão **RESET*
 pulsa DTR/RTS sem precisar reconectar: a telemetria só começa ~18 s após o boot.
 
 Um app só serve aos dois firmwares porque eles não falam a mesma língua na mesma
-UART: o receptor ExpressLRS manda **CRSF binário a 420000** e a bancada manda
-**texto a 115200**. Os dois decidem sozinhos pelo conteúdo — se quadros CRSF
+UART: **420000 para tudo**. O receptor ExpressLRS manda CRSF binário nessa taxa
+e ela é fixa do lado dele, então a bancada foi alinhada nela (`SERIAL_BAUD` no
+platformio.ini) — não há mais o que adivinhar ao abrir uma porta. O que ainda
+varia é o dialeto, e os leitores decidem sozinhos pelo conteúdo — se quadros CRSF
 fecharem o CRC, abre a visão de enlace; senão viram terminal de texto, onde o
 que você digitar vai para o console.
 

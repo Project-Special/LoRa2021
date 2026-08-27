@@ -1190,29 +1190,38 @@ function renderSticks(s) {
     'entao chega ~1 de cada 80';
 }
 
-/* --- transporte: WiFi ou serial --------------------------------------------
+/* --- transporte: WiFi, ou serial ------------------------------------------
+
    O painel nasceu falando HTTP com a propria placa que o serve. Isso cobre o
    caso de campo — celular no AP da placa — e nao cobre o de bancada, em que a
    placa esta no USB do PC e o WiFi dela nem precisa estar ligado (o AP de
    2,4 GHz dessensibiliza o proprio receptor nos pares 2G4).
 
-   Entao: mesma pagina, duas fontes. Por HTTP vem o /api/state inteiro; pela
-   serial vem o que as linhas $T e $R carregam, que e menos — nao ha lista de
-   pares nem UID ali. O que falta simplesmente nao aparece, em vez de aparecer
-   zerado.  */
+   UM baud para tudo: 420000, o do CRSF do ExpressLRS, que e fixo. A bancada
+   foi alinhada nele (platformio.ini, SERIAL_BAUD), entao nao ha o que
+   adivinhar — a porta abre e pronto.
+
+   O que ainda varia e o DIALETO, e esse da para ler do conteudo:
+
+     receptor ExpressLRS    quadros CRSF binarios
+     firmware de bancada    texto  $T / $R
+
+   Byte de endereco CRSF conhecido no inicio do quadro decide, e a decisao e
+   revisada a cada leitura ate a primeira certeza.  */
+
 const LINK = {
-  mode: 'http',            // 'http' | 'serial'
+  mode: 'http',            // 'http' | 'text' | 'crsf'
   port: null,
   reader: null,
-  buf: '',
-  state: null,             // ultimo estado montado a partir de $T / $R
-  seen: 0,
+  text: '',
+  state: null,
+  probing: false,
 };
 
 const serialOk = () => 'serial' in navigator;
 
-/* $T e $R viram o MESMO objeto que o render() ja consome. Assim nenhuma funcao
-   de desenho precisa saber de onde o dado veio. */
+/* ---- dialeto 1: texto do firmware de bancada ---------------------------- */
+
 function feedLine(line) {
   if (line.startsWith('$T ')) {
     const kv = {};
@@ -1224,8 +1233,6 @@ function feedLine(line) {
 
     const n = (k, d) => (kv[k] === undefined ? d : Number(kv[k]));
     const prev = LINK.state || {};
-    const rssi = n('rssi', 0);
-
     LINK.state = Object.assign({}, prev, {
       node: prev.node || 'USB',
       band: kv.band,
@@ -1234,9 +1241,7 @@ function feedLine(line) {
       sf: n('sf', 0),
       cr: prev.cr || 0,
       power: n('pwr', 0),
-      // rssi >= 0 e ausencia de leitura, nao leitura de zero — mesma regra do
-      // app. rx = 0 e o que o painel ja usa para decidir se ha medida.
-      rssi,
+      rssi: n('rssi', 0),
       snr: n('snr', 0),
       rx: n('rx', 0),
       lost: n('lost', 0),
@@ -1249,7 +1254,6 @@ function feedLine(line) {
       radioOk: true,
       log: [],
     });
-    LINK.seen = Date.now();
     return;
   }
 
@@ -1261,66 +1265,205 @@ function feedLine(line) {
     }
     if (!LINK.state) return;
     LINK.state.rc = [kv.a, kv.e, kv.t, kv.r];
+    LINK.state.rcMax = 1023;             // 10 bits, escala do ar do OTA4
     LINK.state.rcSw = kv.sw || 0;
     LINK.state.rcAge = kv.age || 0;
     LINK.state.rcN = kv.cnt || 0;
     return;
   }
 
-  // Qualquer outra linha e log da placa: vai para o registro do painel, que e
-  // exatamente onde ela apareceria pelo HTTP.
   const t = line.trim();
   if (t) log('rx', t);
 }
 
+/* ---- dialeto 2: CRSF do receptor ExpressLRS ----------------------------- */
+
+const CRSF_TYPE_LINK = 0x14;
+const CRSF_TYPE_RC = 0x16;
+const CRSF_ADDR = new Set([0xC8, 0xEA, 0xEC, 0xEE]);
+
+/* CRC-8/DVB-S2, polinomio 0xD5 — o do CRSF. Tabela porque isso roda por
+   quadro, a 50 Hz ou mais. */
+const CRSF_CRC = (() => {
+  const t = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let b = 0; b < 8; b++) c = c & 0x80 ? ((c << 1) ^ 0xD5) & 0xFF : (c << 1) & 0xFF;
+    t[i] = c;
+  }
+  return t;
+})();
+
+function crsfCrc8(b, from, to) {
+  let c = 0;
+  for (let i = from; i < to; i++) c = CRSF_CRC[(c ^ b[i]) & 0xFF];
+  return c;
+}
+
+/* 16 canais de 11 bits empacotados em 22 bytes. Portado de tools/serial. */
+function crsfUnpack(buf, at) {
+  const out = new Array(16);
+  let bitPos = 0;
+  for (let i = 0; i < 16; i++) {
+    const byte = at + (bitPos >> 3);
+    const raw = buf[byte] | (buf[byte + 1] << 8) | (buf[byte + 2] << 16);
+    out[i] = (raw >> (bitPos & 7)) & 0x7FF;
+    bitPos += 11;
+  }
+  return out;
+}
+
+const CRSF = { buf: [], frames: 0, rc: null, link: null };
+
+function crsfFeed(bytes) {
+  for (const x of bytes) CRSF.buf.push(x);
+  // Buffer solto e sinal de sincronismo perdido; nao vale guardar lixo.
+  if (CRSF.buf.length > 2048) CRSF.buf.splice(0, CRSF.buf.length - 512);
+
+  for (;;) {
+    while (CRSF.buf.length && !CRSF_ADDR.has(CRSF.buf[0])) CRSF.buf.shift();
+    if (CRSF.buf.length < 4) return;
+
+    const len = CRSF.buf[1];
+    if (len < 2 || len > 62) { CRSF.buf.shift(); continue; }
+    const total = len + 2;
+    if (CRSF.buf.length < total) return;
+
+    const b = CRSF.buf;
+    // CRC cobre do tipo ate o byte antes do proprio CRC.
+    if (crsfCrc8(b, 2, total - 1) !== b[total - 1]) { CRSF.buf.shift(); continue; }
+
+    const kind = b[2];
+    if (kind === CRSF_TYPE_RC && len >= 24) {
+      CRSF.rc = crsfUnpack(b, 3);
+      CRSF.frames++;
+    } else if (kind === CRSF_TYPE_LINK && len >= 12) {
+      const snr = b[6] < 128 ? b[6] : b[6] - 256;
+      CRSF.link = { rssi: -b[3], lq: b[5], snr, rfMode: b[8], power: b[9] };
+      CRSF.frames++;
+    }
+    CRSF.buf.splice(0, total);
+  }
+}
+
+/* O estado que o render() consome, montado do que o CRSF traz.
+   O que o CRSF NAO carrega — banda, SF, tempo no ar — fica de fora em vez de
+   sair zerado: um receptor ExpressLRS nao reporta a configuracao do modem, e
+   inventar zeros ali faria o painel afirmar coisas que ninguem mediu. */
+function crsfState() {
+  const L = CRSF.link || {};
+  return {
+    node: 'ELRS',
+    band: '2g4',
+    freq: 0, bw: 0, sf: 0, cr: 0,
+    power: L.power === undefined ? 0 : L.power,
+    rssi: L.rssi === undefined ? 0 : L.rssi,
+    snr: L.snr === undefined ? 0 : L.snr,
+    lq: L.lq === undefined ? 255 : L.lq,
+    rx: CRSF.frames,
+    lost: 0,
+    linked: !!CRSF.link,
+    toa: 0, tx: 0, err: 0, rtt: 0,
+    radioOk: true,
+    log: [],
+    rc: CRSF.rc ? CRSF.rc.slice(0, 4) : undefined,
+    // CRSF usa 11 bits: 172..1811 e a faixa util, 992 o centro.
+    rcMax: 2047,
+    rcAll: CRSF.rc || undefined,
+    rcSw: 0,
+    rcAge: 0,
+    rcN: CRSF.frames,
+  };
+}
+
+/* ---- abertura, com deteccao de baud ------------------------------------- */
+
+const SERIAL_BAUD = 420000;
+
 async function serialConnect() {
   if (!serialOk()) {
-    log('err', 'este navegador nao tem Web Serial (use Chrome/Edge no PC)');
+    log('err', 'este navegador nao tem Web Serial (use Chrome ou Edge no PC)');
     return;
   }
   try {
     LINK.port = await navigator.serial.requestPort();
-    await LINK.port.open({ baudRate: 115200, bufferSize: 8192 });
-    LINK.mode = 'serial';
-    LINK.buf = '';
-    LINK.state = null;
-    setTransportUi();
-    log('sys', 'serial aberta a 115200 — a placa nao precisa estar no WiFi');
+  } catch (e) {
+    return;                                   // cancelou o seletor
+  }
 
-    // Silencia o log humano, igual ao app: em quiet a placa emite $T a 1 Hz em
-    // vez de 0,2 Hz, e para o painel isso e a diferenca entre um mostrador que
-    // acompanha e um que arrasta.
+  try {
+    CRSF.buf = []; CRSF.frames = 0; CRSF.rc = null; CRSF.link = null;
+    LINK.text = '';
+    LINK.state = null;
+    LINK.mode = 'auto';
+    await LINK.port.open({ baudRate: SERIAL_BAUD, bufferSize: 8192 });
+    setTransportUi();
+    log('sys', 'serial aberta a ' + SERIAL_BAUD);
+    void serialLoop();
+
+    // A bancada so fala se for perguntada. O receptor ELRS fala sozinho, entao
+    // mandar isto para ele e inofensivo: nao e quadro CRSF valido e ele ignora.
     await serialWrite('quiet on\n');
     await serialWrite('tel\n');
-    void serialLoop();
   } catch (e) {
-    if (e && e.name === 'NotFoundError') return;   // cancelou o seletor
     log('err', 'serial: ' + (e && e.message ? e.message : e));
+    await serialClose(true);
   }
 }
 
 async function serialLoop() {
   const dec = new TextDecoder();
-  LINK.reader = LINK.port.readable.getReader();
+  let reader;
+  try {
+    reader = LINK.port.readable.getReader();
+  } catch {
+    return;
+  }
+  LINK.reader = reader;
   try {
     for (;;) {
-      const { value, done } = await LINK.reader.read();
-      if (done) break;
-      LINK.buf += dec.decode(value, { stream: true });
-      let i;
-      while ((i = LINK.buf.indexOf('\n')) >= 0) {
-        const line = LINK.buf.slice(0, i).replace(/\r$/, '');
-        LINK.buf = LINK.buf.slice(i + 1);
-        if (line) feedLine(line);
+      const { value, done } = await reader.read();
+      if (done || LINK.mode === 'closing' || LINK.mode === 'http') break;
+
+      // Alimenta OS DOIS parsers enquanto o dialeto nao esta decidido. Quem
+      // produzir primeiro ganha, e a partir dai so ele roda. Escolher pelo
+      // primeiro byte seria fragil: a porta pode abrir no meio de um quadro.
+      if (LINK.mode === 'auto' || LINK.mode === 'crsf') {
+        crsfFeed(value);
+        if (CRSF.frames) {
+          if (LINK.mode !== 'crsf') {
+            LINK.mode = 'crsf';
+            setTransportUi();
+            log('sys', 'dialeto CRSF — receptor ExpressLRS');
+          }
+          render(crsfState());
+          continue;
+        }
       }
-      // Linha gigante sem quebra e lixo binario; nao vale guardar.
-      if (LINK.buf.length > 4096) LINK.buf = '';
-      if (LINK.state) render(LINK.state);
+
+      if (LINK.mode === 'auto' || LINK.mode === 'text') {
+        LINK.text += dec.decode(value, { stream: true });
+        let i;
+        while ((i = LINK.text.indexOf('\n')) >= 0) {
+          const line = LINK.text.slice(0, i).replace(/\r$/, '');
+          LINK.text = LINK.text.slice(i + 1);
+          if (line) feedLine(line);
+        }
+        if (LINK.text.length > 4096) LINK.text = '';
+        if (LINK.state) {
+          if (LINK.mode !== 'text') {
+            LINK.mode = 'text';
+            setTransportUi();
+            log('sys', 'dialeto texto — firmware de bancada');
+          }
+          render(LINK.state);
+        }
+      }
     }
   } catch (e) {
-    log('err', 'leitura da serial parou: ' + (e && e.message ? e.message : e));
+    log('err', 'leitura parou: ' + (e && e.message ? e.message : e));
   } finally {
-    try { LINK.reader.releaseLock(); } catch { /* ja solto */ }
+    try { reader.releaseLock(); } catch { /* ja solto */ }
   }
 }
 
@@ -1334,26 +1477,41 @@ async function serialWrite(text) {
   }
 }
 
-async function serialDisconnect() {
-  // Devolve o console a placa: quem plugar o monitor depois espera achar o
-  // firmware falando, nao mudo.
-  await serialWrite('quiet off\n').catch(() => undefined);
+async function serialClose(full) {
+  if (LINK.mode === 'text') {
+    // Devolve o console a placa: quem plugar o monitor depois espera achar o
+    // firmware falando, nao mudo.
+    await serialWrite('quiet off\n').catch(() => undefined);
+  }
+  const m = LINK.mode;
+  LINK.mode = 'closing';
   try { await LINK.reader?.cancel(); } catch { /* ja parou */ }
-  try { await LINK.port?.close(); } catch { /* ja fechada */ }
-  LINK.port = null;
   LINK.reader = null;
-  LINK.mode = 'http';
-  LINK.state = null;
-  setTransportUi();
+  try { await LINK.port?.close(); } catch { /* ja fechada */ }
+  LINK.mode = m;
+  if (full) {
+    LINK.port = null;
+    LINK.mode = 'http';
+    LINK.state = null;
+    setTransportUi();
+  }
+}
+
+async function serialDisconnect() {
+  await serialClose(true);
   log('sys', 'serial fechada — voltando ao WiFi');
 }
 
 function setTransportUi() {
-  const ser = LINK.mode === 'serial';
+  const ser = LINK.mode === 'crsf' || LINK.mode === 'text' || LINK.mode === 'auto';
   $('btSerial').hidden = ser;
   $('btSerialOff').hidden = !ser;
-  $('transport').textContent = ser ? 'USB · 115200' : 'WiFi · HTTP';
-  $('transport').dataset.mode = LINK.mode;
+  $('transport').textContent =
+    LINK.mode === 'crsf' ? 'USB · CRSF'
+    : LINK.mode === 'text' ? 'USB · bancada'
+    : LINK.mode === 'auto' ? 'USB · ouvindo…'
+    : 'WiFi · HTTP';
+  $('transport').dataset.mode = ser ? 'serial' : 'http';
 }
 
 $('btSerial').addEventListener('click', () => void serialConnect());

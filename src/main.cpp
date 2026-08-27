@@ -3,7 +3,7 @@
 
   Flash the same firmware into two boards. They beacon at a fixed interval and
   print every frame received from the peer with RSSI/SNR. A serial console at
-  115200 baud lets you retune band, frequency, power and modem parameters
+  420000 baud lets you retune band, frequency, power and modem parameters
   without reflashing - handy for comparing the sub-GHz and 2.4 GHz paths of the
   LR2021 side by side.
 
@@ -114,7 +114,7 @@ uint32_t nextTxSummaryAt = 0;
 //
 // O console deste firmware foi escrito para gente ler no monitor. Ligado a um
 // celular ele passa a ser um canal de dados, e aí todo aquele texto é banda
-// gasta e CPU gasta — a 115200, uma linha de 90 caracteres custa ~8 ms, e o
+// gasta e CPU gasta — a 420000, uma linha de 90 caracteres custa ~2 ms, e o
 // resumo mais o "TX done" de cada quadro competiam com a própria telemetria.
 //
 // O app manda `quiet on` ao conectar. Pelo monitor, `quiet off` devolve tudo.
@@ -827,7 +827,7 @@ void pollSerial() {
 }  // namespace
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(SERIAL_BAUD);
   const uint32_t deadline = millis() + 2000;
   while (!Serial && millis() < deadline) {
     delay(10);

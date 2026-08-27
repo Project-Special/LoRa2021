@@ -24,7 +24,14 @@ import { Diag } from './Diag';
  * precisa existir.
  */
 
-const BAUD = 115200;
+/**
+ * O MESMO baud do resto do projeto.
+ *
+ * 420000 vem do CRSF do ExpressLRS, que e fixo. Alinhar a bancada nele acaba
+ * com a adivinhacao: qualquer ferramenta abre em 420000 e conversa com
+ * qualquer uma das duas placas, seja ela bancada ou receptor ELRS.
+ */
+const BAUD = 420000;
 
 export interface SerialTransport {
   readonly name: string;
@@ -308,7 +315,7 @@ export class RadioService {
     // Silencia o log humano da placa.
     //
     // O console do firmware e escrito para gente ler no monitor. Ligado aqui
-    // ele vira canal de dados, e a 115200 cada linha de texto custa ~8 ms — o
+    // ele vira canal de dados, e a 420000 cada linha de texto custa ~2 ms — o
     // resumo periodico e o log por quadro competiam com a propria telemetria.
     // Em quiet a placa emite so `$T`, e a 1 Hz em vez de 0,2 Hz.
     await t.write('quiet on\n');

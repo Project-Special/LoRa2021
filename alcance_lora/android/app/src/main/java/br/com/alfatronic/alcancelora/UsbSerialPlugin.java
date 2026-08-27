@@ -125,7 +125,9 @@ public class UsbSerialPlugin extends Plugin implements SerialInputOutputManager.
 
     @PluginMethod
     public void open(PluginCall call) {
-        int baudRate = call.getInt("baudRate", 115200);
+        // 420000: o baud unico do projeto. O JS manda explicito, mas um default
+        // divergente seria uma armadilha para quem chamasse sem o parametro.
+        int baudRate = call.getInt("baudRate", 420000);
         try {
             List<UsbSerialDriver> drivers = UsbSerialProber.getDefaultProber().findAllDrivers(usbManager);
             if (drivers.isEmpty()) {
