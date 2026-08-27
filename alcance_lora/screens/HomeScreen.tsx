@@ -5,7 +5,8 @@ import { StatusBar } from '../components/StatusBar';
 import { ConsolePanel } from '../components/ConsolePanel';
 import { SessionStore } from '../services/SessionStore';
 import { CloudSync, CloudSummary } from '../services/CloudSync';
-import { formatDistance } from '../lib/geo';
+import { formatDistance, rssiColor, rssiFraction } from '../lib/geo';
+import { Digit, Gauge } from '../components/Gauge';
 import { LinkLed } from '../components/LinkLed';
 import { exportText } from '../lib/exportFile';
 import { CloudState } from '../hooks/useRangeSession';
@@ -45,14 +46,6 @@ interface Props {
   onOpenMap: () => void;
   onOpenDatabase: () => void;
 }
-
-const Stat: React.FC<{ label: string; value: string; hint?: string }> = ({ label, value, hint }) => (
-  <div className="rounded-xl bg-white/5 border border-white/10 p-3">
-    <div className="text-[11px] uppercase tracking-wider text-slate-400">{label}</div>
-    <div className="text-xl font-bold tabular-nums">{value}</div>
-    {hint && <div className="text-[11px] text-slate-500">{hint}</div>}
-  </div>
-);
 
 export const HomeScreen: React.FC<Props> = (p) => {
   const [mode, setMode] = useState<Mode>('menu');
@@ -320,17 +313,38 @@ export const HomeScreen: React.FC<Props> = (p) => {
 
       {mode === 'live' && (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-2">
-            <Stat label="RSSI" value={p.live?.rssi != null ? `${p.live.rssi} dBm` : '—'} />
-            <Stat label="SNR" value={p.live?.snr != null ? `${p.live.snr} dB` : '—'} />
-            <Stat label="Distância" value={formatDistance(p.lastSample?.distance ?? null)} hint="do transmissor" />
-            <Stat
-              label="Altitude"
-              value={p.lastSample?.altitude == null ? '—' : `${Math.round(p.lastSample.altitude)} m`}
-              hint={p.lastSample?.accuracy != null ? `±${Math.round(p.lastSample.accuracy)} m` : undefined}
+          {/* Mostradores grandes para as duas grandezas que decidem a
+              campanha; o resto vira linha de leitura. Ver components/Gauge. */}
+          <div className="grid gap-2">
+            <Gauge
+              label="Sinal"
+              value={p.live?.rssi ?? null}
+              unit="dBm"
+              fill={rssiFraction(p.live?.rssi ?? null)}
+              color={rssiColor(p.live?.rssi ?? null)}
+              hint={p.live?.linked ? undefined : 'sem enlace — nenhum quadro chegando'}
             />
-            <Stat label="Amostras" value={String(p.samples.length)} />
-            <Stat label="Enlace" value={p.live?.linked ? 'vivo' : 'ausente'} />
+            <Gauge
+              label="Qualidade de enlace"
+              value={p.live?.lq ?? null}
+              unit="%"
+              fill={(p.live?.lq ?? 0) / 100}
+              // LQ é percentual: a própria cor do valor conta a história, do
+              // vermelho ao verde, sem precisar decorar faixa nenhuma.
+              color={`hsl(${Math.round(((p.live?.lq ?? 0) / 100) * 120)}, 85%, 45%)`}
+            />
+          </div>
+
+          <div className="rounded-xl bg-white/5 border border-white/10 p-4 grid gap-3">
+            <Digit label="SNR" value={p.live?.snr != null ? String(p.live.snr) : '––'} unit="dB" />
+            <Digit label="Distância" value={formatDistance(p.lastSample?.distance ?? null)} unit="do TX" />
+            <Digit
+              label="Altitude"
+              value={p.lastSample?.altitude == null ? '––' : String(Math.round(p.lastSample.altitude))}
+              unit={p.lastSample?.accuracy != null ? `m · ±${Math.round(p.lastSample.accuracy)} m` : 'm'}
+            />
+            <Digit label="Amostras" value={String(p.samples.length)} />
+            <Digit label="Enlace" value={p.live?.linked ? 'vivo' : 'ausente'} />
           </div>
 
           <div className="rounded-xl border border-white/10 p-3">

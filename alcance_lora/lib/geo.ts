@@ -59,6 +59,19 @@ export function formatDistance(m: number | null): string {
  * A escala vai de -40 dBm (colado) a -120 dBm (no limite da sensibilidade), que
  * é a faixa útil de LoRa. Fora dela satura nas pontas em vez de sair da escala.
  */
+/**
+ * Fração 0..1 do RSSI na faixa útil, para preencher barra de mostrador.
+ *
+ * Mesma escala do rssiColor: -120 dBm no limite da sensibilidade, -40 colado.
+ * Uma só definição para os dois, senão a barra e a cor discordariam sobre o
+ * que é "meio" — e discordar sobre a mesma grandeza na mesma tela é pior que
+ * não mostrar nenhuma das duas.
+ */
+export function rssiFraction(rssi: number | null): number {
+  if (rssi == null || !Number.isFinite(rssi)) return 0;
+  return Math.max(0, Math.min(1, (Math.max(-120, Math.min(-40, rssi)) + 120) / 80));
+}
+
 export function rssiColor(rssi: number | null): string {
   if (rssi == null) return '#64748b';
   const clamped = Math.max(-120, Math.min(-40, rssi));
