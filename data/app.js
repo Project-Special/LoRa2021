@@ -383,6 +383,7 @@ function renderLq(s) {
    nao mostrar nenhuma das duas. */
 function renderGauges(s) {
   renderLq(s);
+  renderSticks(s);
 
   const out = $('gRssi');
   const bar = $('gRssiBar');
@@ -569,6 +570,10 @@ $('interval').addEventListener('change', async (ev) => {
 let offline = false;
 
 async function poll() {
+  // Pela serial quem manda o render sao as linhas que chegam, nao o relogio:
+  // pedir /api/state numa pagina servida do PC daria 404 a cada segundo e
+  // encheria o registro de erro sobre um transporte que nao esta em uso.
+  if (LINK.mode === 'serial') return;
   try {
     render(await api('api/state'));
     if (offline) { offline = false; log('sys', 'rádio respondendo de novo'); }
@@ -1099,3 +1104,259 @@ $('sbForget').addEventListener('click', () => {
 // trocou a credencial na tela esta corrigindo o arquivo, nao o contrario — e a
 // ordem inversa faria "trocar" nunca pegar nesta maquina.
 sbApply(sbLoad() || window.SUPABASE_LOCAL || null);
+
+/* --- manches e chaves do ExpressLRS ----------------------------------------
+   Os quatro canais vem no RCDATA em 10 bits (0..1023), na ordem AETR. A barra
+   e proporcional ao valor cru: converter para a escala CRSF (172..1811) so
+   acrescentaria uma conversao para desconverter na hora de desenhar.
+
+   As chaves sao os 7 bits do byte 6 mais o bit alto, que carrega o AUX1.  */
+const CH_NAMES = ['Aileron', 'Profundor', 'Motor', 'Leme'];
+
+let sticksBuilt = false;
+
+function buildSticks() {
+  if (sticksBuilt) return;
+  const box = $('chans');
+  box.innerHTML = '';
+  for (let i = 0; i < 4; i++) {
+    const row = document.createElement('div');
+    row.className = 'chan';
+
+    const lb = document.createElement('span');
+    lb.className = 'chan__lb';
+    lb.textContent = CH_NAMES[i];
+
+    const track = document.createElement('span');
+    track.className = 'chan__track';
+    const fill = document.createElement('span');
+    fill.className = 'chan__fill';
+    fill.id = 'ch' + i;
+    fill.style.width = '50%';
+    track.appendChild(fill);
+
+    const v = document.createElement('span');
+    v.className = 'chan__v';
+    v.id = 'chv' + i;
+    v.textContent = '––––';
+
+    row.append(lb, track, v);
+    box.appendChild(row);
+  }
+
+  const sw = $('switches');
+  sw.innerHTML = '';
+  for (let i = 0; i < 8; i++) {
+    const b = document.createElement('span');
+    b.className = 'sw';
+    b.id = 'sw' + i;
+    b.textContent = 'AUX' + (i + 1);
+    sw.appendChild(b);
+  }
+  sticksBuilt = true;
+}
+
+function renderSticks(s) {
+  const has = Array.isArray(s.rc) && s.rc.length === 4;
+  $('sticks').hidden = !has;
+  $('rcOff').hidden = has;
+  if (!has) return;
+
+  buildSticks();
+
+  for (let i = 0; i < 4; i++) {
+    const raw = s.rc[i];
+    $('ch' + i).style.width = ((raw / 1023) * 100).toFixed(1) + '%';
+    $('chv' + i).textContent = raw;
+  }
+
+  const bits = s.rcSw || 0;
+  for (let i = 0; i < 8; i++) {
+    // AUX1 vem do bit alto separado (ch4); os outros sao os 7 bits do byte.
+    const on = i === 0 ? (bits >> 6) & 1 : (bits >> (i - 1)) & 1;
+    $('sw' + i).dataset.on = on ? '1' : '0';
+  }
+
+  // A taxa REAL de RCDATA, e nao a taxa do transmissor.
+  //
+  // O ELRS salta 80 canais e a bancada senta so no de sync, entao chega uma
+  // fracao dos pacotes. Mostrar isso evita que barras lentas sejam lidas como
+  // travamento — elas estao certas, o que e baixo e a colheita.
+  const dt = s.rcAge;
+  $('rcRate').textContent =
+    (dt < 1200 ? 'ao vivo' : 'ultimo ha ' + (dt / 1000).toFixed(1) + ' s');
+  $('rcNote').textContent =
+    s.rcN + ' quadro(s) RCDATA decodificado(s) · so o canal de sync e ouvido, ' +
+    'entao chega ~1 de cada 80';
+}
+
+/* --- transporte: WiFi ou serial --------------------------------------------
+   O painel nasceu falando HTTP com a propria placa que o serve. Isso cobre o
+   caso de campo — celular no AP da placa — e nao cobre o de bancada, em que a
+   placa esta no USB do PC e o WiFi dela nem precisa estar ligado (o AP de
+   2,4 GHz dessensibiliza o proprio receptor nos pares 2G4).
+
+   Entao: mesma pagina, duas fontes. Por HTTP vem o /api/state inteiro; pela
+   serial vem o que as linhas $T e $R carregam, que e menos — nao ha lista de
+   pares nem UID ali. O que falta simplesmente nao aparece, em vez de aparecer
+   zerado.  */
+const LINK = {
+  mode: 'http',            // 'http' | 'serial'
+  port: null,
+  reader: null,
+  buf: '',
+  state: null,             // ultimo estado montado a partir de $T / $R
+  seen: 0,
+};
+
+const serialOk = () => 'serial' in navigator;
+
+/* $T e $R viram o MESMO objeto que o render() ja consome. Assim nenhuma funcao
+   de desenho precisa saber de onde o dado veio. */
+function feedLine(line) {
+  if (line.startsWith('$T ')) {
+    const kv = {};
+    for (const tok of line.slice(3).trim().split(/\s+/)) {
+      const eq = tok.indexOf('=');
+      if (eq > 0) kv[tok.slice(0, eq)] = tok.slice(eq + 1);
+    }
+    if (kv.rssi === undefined || !kv.band) return;
+
+    const n = (k, d) => (kv[k] === undefined ? d : Number(kv[k]));
+    const prev = LINK.state || {};
+    const rssi = n('rssi', 0);
+
+    LINK.state = Object.assign({}, prev, {
+      node: prev.node || 'USB',
+      band: kv.band,
+      freq: n('freq', 0),
+      bw: n('bw', 0),
+      sf: n('sf', 0),
+      cr: prev.cr || 0,
+      power: n('pwr', 0),
+      // rssi >= 0 e ausencia de leitura, nao leitura de zero — mesma regra do
+      // app. rx = 0 e o que o painel ja usa para decidir se ha medida.
+      rssi,
+      snr: n('snr', 0),
+      rx: n('rx', 0),
+      lost: n('lost', 0),
+      lq: n('lq', 255),
+      linked: kv.link === '1',
+      toa: prev.toa || 0,
+      tx: prev.tx || 0,
+      err: prev.err || 0,
+      rtt: 0,
+      radioOk: true,
+      log: [],
+    });
+    LINK.seen = Date.now();
+    return;
+  }
+
+  if (line.startsWith('$R ')) {
+    const kv = {};
+    for (const tok of line.slice(3).trim().split(/\s+/)) {
+      const eq = tok.indexOf('=');
+      if (eq > 0) kv[tok.slice(0, eq)] = Number(tok.slice(eq + 1));
+    }
+    if (!LINK.state) return;
+    LINK.state.rc = [kv.a, kv.e, kv.t, kv.r];
+    LINK.state.rcSw = kv.sw || 0;
+    LINK.state.rcAge = kv.age || 0;
+    LINK.state.rcN = kv.cnt || 0;
+    return;
+  }
+
+  // Qualquer outra linha e log da placa: vai para o registro do painel, que e
+  // exatamente onde ela apareceria pelo HTTP.
+  const t = line.trim();
+  if (t) log('rx', t);
+}
+
+async function serialConnect() {
+  if (!serialOk()) {
+    log('err', 'este navegador nao tem Web Serial (use Chrome/Edge no PC)');
+    return;
+  }
+  try {
+    LINK.port = await navigator.serial.requestPort();
+    await LINK.port.open({ baudRate: 115200, bufferSize: 8192 });
+    LINK.mode = 'serial';
+    LINK.buf = '';
+    LINK.state = null;
+    setTransportUi();
+    log('sys', 'serial aberta a 115200 — a placa nao precisa estar no WiFi');
+
+    // Silencia o log humano, igual ao app: em quiet a placa emite $T a 1 Hz em
+    // vez de 0,2 Hz, e para o painel isso e a diferenca entre um mostrador que
+    // acompanha e um que arrasta.
+    await serialWrite('quiet on\n');
+    await serialWrite('tel\n');
+    void serialLoop();
+  } catch (e) {
+    if (e && e.name === 'NotFoundError') return;   // cancelou o seletor
+    log('err', 'serial: ' + (e && e.message ? e.message : e));
+  }
+}
+
+async function serialLoop() {
+  const dec = new TextDecoder();
+  LINK.reader = LINK.port.readable.getReader();
+  try {
+    for (;;) {
+      const { value, done } = await LINK.reader.read();
+      if (done) break;
+      LINK.buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = LINK.buf.indexOf('\n')) >= 0) {
+        const line = LINK.buf.slice(0, i).replace(/\r$/, '');
+        LINK.buf = LINK.buf.slice(i + 1);
+        if (line) feedLine(line);
+      }
+      // Linha gigante sem quebra e lixo binario; nao vale guardar.
+      if (LINK.buf.length > 4096) LINK.buf = '';
+      if (LINK.state) render(LINK.state);
+    }
+  } catch (e) {
+    log('err', 'leitura da serial parou: ' + (e && e.message ? e.message : e));
+  } finally {
+    try { LINK.reader.releaseLock(); } catch { /* ja solto */ }
+  }
+}
+
+async function serialWrite(text) {
+  if (!LINK.port || !LINK.port.writable) return;
+  const w = LINK.port.writable.getWriter();
+  try {
+    await w.write(new TextEncoder().encode(text));
+  } finally {
+    w.releaseLock();
+  }
+}
+
+async function serialDisconnect() {
+  // Devolve o console a placa: quem plugar o monitor depois espera achar o
+  // firmware falando, nao mudo.
+  await serialWrite('quiet off\n').catch(() => undefined);
+  try { await LINK.reader?.cancel(); } catch { /* ja parou */ }
+  try { await LINK.port?.close(); } catch { /* ja fechada */ }
+  LINK.port = null;
+  LINK.reader = null;
+  LINK.mode = 'http';
+  LINK.state = null;
+  setTransportUi();
+  log('sys', 'serial fechada — voltando ao WiFi');
+}
+
+function setTransportUi() {
+  const ser = LINK.mode === 'serial';
+  $('btSerial').hidden = ser;
+  $('btSerialOff').hidden = !ser;
+  $('transport').textContent = ser ? 'USB · 115200' : 'WiFi · HTTP';
+  $('transport').dataset.mode = LINK.mode;
+}
+
+$('btSerial').addEventListener('click', () => void serialConnect());
+$('btSerialOff').addEventListener('click', () => void serialDisconnect());
+if (!serialOk()) $('btSerial').disabled = true;
+setTransportUi();

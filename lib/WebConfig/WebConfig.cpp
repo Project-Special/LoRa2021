@@ -172,6 +172,21 @@ String WebConfig::stateJson_() {
   j += "\"lq\":" + String(hooks_.linkQuality ? hooks_.linkQuality() : 255) + ',';
   j += "\"lost\":" + String(hooks_.lostFrames ? hooks_.lostFrames() : 0) + ',';
 
+  // Canais só entram no JSON quando existem de verdade. Um array de zeros
+  // sempre presente faria o painel desenhar manches centrados mesmo sem
+  // transmissor nenhum no ar.
+  uint16_t ch[4] = {0, 0, 0, 0};
+  uint8_t sw = 0;
+  uint32_t rcAge = 0;
+  uint32_t rcN = 0;
+  if (hooks_.rcChannels && hooks_.rcChannels(ch, &sw, &rcAge, &rcN)) {
+    j += "\"rc\":[" + String(ch[0]) + ',' + String(ch[1]) + ',' + String(ch[2]) +
+         ',' + String(ch[3]) + "],";
+    j += "\"rcSw\":" + String(sw) + ',';
+    j += "\"rcAge\":" + String(rcAge) + ',';
+    j += "\"rcN\":" + String(rcN) + ',';
+  }
+
   j += "\"bands\":[";
   for (uint8_t i = 0; i < BAND_COUNT; i++) {
     if (i) j += ',';

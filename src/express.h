@@ -81,6 +81,43 @@ void buildSync(uint8_t* out, uint8_t fhssIndex, uint8_t nonce,
                uint8_t rateIndex, uint8_t tlmRatio = 4,
                bool switchEncMode = false);
 
+// ---- canais de RC -----------------------------------------------------------
+
+/**
+ * Posição dos manches e das chaves, decodificada de um pacote RCDATA.
+ *
+ * Quatro canais de 10 bits (AETR) mais um byte de chaves, que é o formato
+ * OTA4 do ExpressLRS em `smWideOr8ch` — ver OTA_Packet4_s.rc no OTA.h da 3.6.4.
+ */
+struct RcChannels {
+  /** 0..1023, na ordem A E T R. Escala crua do ar, sem converter para CRSF. */
+  uint16_t ch[4];
+  /** 7 bits de chaves + o bit alto do AUX1. */
+  uint8_t switches;
+  uint8_t ch4;
+  /** Nonce que validou o CRC. Serve de número de sequência. */
+  uint8_t nonce;
+};
+
+/**
+ * Tenta ler um RCDATA e extrair os canais.
+ *
+ * O CRC do RCDATA é semeado com `OtaCrcInitializer ^ OtaNonce` (OTA.cpp:531),
+ * e o nonce só se conhece estando sincronizado. MAS ele é um uint8_t: são 256
+ * chaves possíveis, e testar todas custa ~14 mil operações — microssegundos no
+ * ESP32. É isso que torna a decodificação possível sem ser um receptor.
+ *
+ * O preço é falso positivo: um CRC de 14 bits contra 256 chaves aceita ruído
+ * com probabilidade ~1,6% por pacote. Por isso `rcValid()` só passa a valer
+ * depois de alguns pacotes coerentes — ver rcCount().
+ */
+bool decodeRc(const uint8_t* p, uint8_t len, RcChannels& out);
+
+/** Último RCDATA válido, e há quanto tempo. */
+const RcChannels& rc();
+uint32_t rcAgeMs();
+uint32_t rcCount();
+
 // ---- validação de pacote ----------------------------------------------------
 
 // true = os bytes passam no CRC14 do ELRS semeado pelo nosso UID.

@@ -1023,3 +1023,93 @@ input:focus, select:focus {
 }
 
 .gdigits__row i { font-style: normal; font-size: var(--t-mini); color: var(--ink-far); }
+
+/* ═════════════════════════════════════════════════ manches e chaves ═════ */
+.sticks[hidden] { display: none; }
+.sticks { margin-bottom: 22px; }
+
+.sticks__hd {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: var(--t-micro);
+  letter-spacing: .18em;
+  color: var(--ink-far);
+  margin-bottom: 12px;
+}
+
+.sticks__hd b { color: var(--glow); letter-spacing: .08em; }
+
+.chans { display: grid; gap: 10px; }
+
+.chan { display: flex; align-items: center; gap: 10px; }
+
+.chan__lb {
+  min-width: 74px;
+  font-size: var(--t-micro);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink-far);
+}
+
+/* Trilho com marca de centro. Sem ela não dá para ver que um manche está no
+   meio — que é a posição mais importante de todas num teste de RC. */
+.chan__track {
+  position: relative;
+  flex: 1;
+  height: 12px;
+  border-radius: 2px;
+  background: #0c110f;
+  box-shadow: inset 0 1px 3px #000, inset 0 0 0 1px #ffffff0a;
+  overflow: hidden;
+}
+
+.chan__track::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  bottom: 2px;
+  width: 1px;
+  background: #ffffff26;
+}
+
+.chan__fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--glow-4), var(--glow));
+  box-shadow: 0 0 10px var(--glow-4);
+  transition: width .09s linear;
+}
+
+.chan__v {
+  min-width: 44px;
+  text-align: right;
+  font-size: var(--t-mini);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim);
+}
+
+.switches { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+
+.sw {
+  min-width: 46px;
+  text-align: center;
+  padding: 6px 8px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  font-size: var(--t-mini);
+  letter-spacing: .08em;
+  color: var(--ink-far);
+  background: #0000004d;
+}
+
+.sw[data-on="1"] {
+  color: var(--glow);
+  border-color: var(--glow);
+  box-shadow: 0 0 12px var(--glow-2), inset 0 0 12px var(--glow-2);
+}
+
+/* Placa de transporte: WiFi (HTTP) ou USB (Web Serial). */
+.plate output[data-mode="serial"] { color: var(--glow); }
+.plate .btn { margin-top: 6px; padding: 4px 10px; font-size: var(--t-mini); }

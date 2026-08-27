@@ -34,6 +34,16 @@
         <label>NODE</label>
         <output id="node">····</output>
       </div>
+      <!-- Transporte. Pelo AP da placa o painel fala HTTP; no PC, com a placa
+           no USB, ele fala Web Serial e o WiFi da placa nem precisa estar
+           ligado — o que importa nos pares 2G4, onde o AP dessensibiliza o
+           proprio receptor. -->
+      <div class="plate">
+        <label>Fonte</label>
+        <output id="transport" data-mode="http">WiFi · HTTP</output>
+        <button class="btn btn--ghost" id="btSerial" type="button">USB</button>
+        <button class="btn btn--ghost" id="btSerialOff" type="button" hidden>fechar</button>
+      </div>
       <div class="plate plate--link" id="link" data-state="off">
         <label>ENLACE</label>
         <output><span class="lamp"></span><span id="linkTxt">AUSENTE</span></output>
@@ -275,6 +285,25 @@
         <p class="gauge__note" id="lqNote">·</p>
       </div>
     </div>
+
+    <!-- Manches e chaves do ExpressLRS.
+         So aparece quando ha RCDATA valido chegando: fora do modo escuta, ou
+         sem transmissor no ar, quatro barras no meio seriam manches de um
+         piloto imaginario. -->
+    <div class="sticks" id="sticks" hidden>
+      <div class="sticks__hd">
+        MANCHES E CHAVES
+        <b id="rcRate">·</b>
+      </div>
+      <div class="chans" id="chans"></div>
+      <div class="switches" id="switches"></div>
+      <p class="gauge__note" id="rcNote">·</p>
+    </div>
+
+    <p class="gauge__note" id="rcOff">
+      Manches aparecem no <b>modo escuta</b> (par <code>elrs2g4</code> ou
+      <code>elrs900</code>) com um transmissor ExpressLRS no ar.
+    </p>
 
     <div class="gdigits">
       <div class="gdigits__row"><span>SNR</span><b id="gSnr">––.–</b><i>dB</i></div>

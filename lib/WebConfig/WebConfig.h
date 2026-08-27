@@ -43,6 +43,14 @@ class WebConfig {
     // painel de diagnóstico.
     std::function<uint8_t()> linkQuality;
     std::function<uint32_t()> lostFrames;
+    /**
+     * Canais de RC decodificados do ExpressLRS, se houver.
+     *
+     * Devolve false quando não há RCDATA válido — o que é o normal fora do modo
+     * escuta. O painel esconde as barras nesse caso em vez de desenhar quatro
+     * zeros, que pareceriam manches centrados de um transmissor imaginário.
+     */
+    std::function<bool(uint16_t* ch4, uint8_t* sw, uint32_t* ageMs, uint32_t* count)> rcChannels;
     // Rede de casamento sub-GHz fechada na matriz de solda do módulo. Não é
     // ajuste de rádio: é o firmware sabendo como o hardware está montado.
     uint16_t* matchedBand = nullptr;

@@ -31,6 +31,10 @@ uint8_t peer_ = kFactoryPeer;
 uint32_t valid_ = 0;
 uint32_t raw_ = 0;
 
+RcChannels rc_{};
+uint32_t rcAt_ = 0;
+uint32_t rcCount_ = 0;
+
 // O ExpressLRS NÃO hasheia a frase pura: o binary_configurator monta a string
 // -DMY_BINDING_PHRASE="<frase>" e tira o MD5 DISSO. Errar esse detalhe muda o
 // UID e, com ele, a inversão de IQ e a semente do CRC — o receptor demodula
@@ -165,6 +169,81 @@ uint16_t crc14(const uint8_t* p) {
   return crc & 0x3FFF;
 }
 
+/**
+ * CRC14 com semente explícita.
+ *
+ * O crc14() acima assume a semente do SYNC (nonce zero). O RCDATA usa
+ * `OtaCrcInitializer ^ nonce`, então o cálculo precisa aceitar a semente de
+ * fora — é a única diferença entre validar um e outro.
+ */
+static uint16_t crc14Seeded(const uint8_t* p, uint16_t seed) {
+  uint16_t crc = seed;
+
+  uint8_t buf[7];
+  buf[0] = p[0] & 0x03;
+  memcpy(&buf[1], &p[1], 6);
+
+  for (uint8_t i = 0; i < 7; i++) {
+    crc ^= static_cast<uint16_t>(buf[i]) << 6;
+    for (uint8_t b = 0; b < 8; b++) {
+      crc = (crc & 0x2000) ? static_cast<uint16_t>((crc << 1) ^ 0x2E57)
+                           : static_cast<uint16_t>(crc << 1);
+    }
+  }
+  return crc & 0x3FFF;
+}
+
+/**
+ * Desempacota 4 canais de 10 bits de 5 bytes.
+ *
+ * Portado de UnpackChannels4x10ToUInt11 (OTA.cpp:306), sem a expansão para 11
+ * bits: aqui o valor cru de 10 bits basta, porque a barra do painel é
+ * proporcional e não precisa da escala CRSF.
+ */
+static void unpack4x10(const uint8_t* payload, uint16_t* dest) {
+  uint8_t bitsMerged = 0;
+  uint32_t readValue = 0;
+  unsigned readByteIndex = 0;
+  for (uint8_t n = 0; n < 4; n++) {
+    while (bitsMerged < 10) {
+      readValue |= static_cast<uint32_t>(payload[readByteIndex++]) << bitsMerged;
+      bitsMerged += 8;
+    }
+    dest[n] = static_cast<uint16_t>(readValue & 0x3FF);
+    readValue >>= 10;
+    bitsMerged -= 10;
+  }
+}
+
+bool decodeRc(const uint8_t* p, uint8_t len, RcChannels& out) {
+  if (len < 8) return false;
+  if ((p[0] & 0x03) != 0) return false;  // tipo 0 = RCDATA
+
+  const uint16_t rx = ((static_cast<uint16_t>(p[0]) >> 2) << 8) | p[7];
+  const uint16_t base = ((static_cast<uint16_t>(uid_[4]) << 8) | uid_[5]) ^ 3;
+
+  // Força bruta no nonce. 256 chaves, cada uma 7 bytes de CRC: microssegundos.
+  //
+  // Começa pelo nonce seguinte ao último aceito — num enlace vivo ele
+  // incrementa de um em um, então o primeiro palpite quase sempre acerta e o
+  // laço sai na primeira volta.
+  for (uint16_t k = 0; k < 256; k++) {
+    const uint8_t nonce = static_cast<uint8_t>(rc_.nonce + 1 + k);
+    if (crc14Seeded(p, base ^ nonce) != rx) continue;
+
+    unpack4x10(&p[1], out.ch);
+    out.switches = p[6] & 0x7F;
+    out.ch4 = (p[6] >> 7) & 0x01;
+    out.nonce = nonce;
+    return true;
+  }
+  return false;
+}
+
+const RcChannels& rc() { return rc_; }
+uint32_t rcAgeMs() { return rcAt_ ? (millis() - rcAt_) : 0xFFFFFFFF; }
+uint32_t rcCount() { return rcCount_; }
+
 bool crcOk(const uint8_t* p, uint8_t len) {
   if (len < 8) return false;
   const uint16_t rx = ((static_cast<uint16_t>(p[0]) >> 2) << 8) | p[7];
@@ -194,21 +273,50 @@ bool describe(const uint8_t* p, uint8_t len, String& out) {
   // Conta ANTES de julgar: o que interessa aqui é quantos pacotes o rádio
   // conseguiu demodular, e isso não depende do CRC passar.
   raw_++;
-  if (!crcOk(p, len)) return false;
+
+  // Cada tipo valida do seu jeito, porque a semente do CRC difere: o SYNC usa
+  // nonce zero e o RCDATA usa o nonce corrente (OTA.cpp:531). Tratar os dois
+  // com crcOk() reprovava 100% dos RCDATA — era por isso que os manches nunca
+  // apareciam.
+  const uint8_t tipo = p[0] & 0x03;
+  bool ok = false;
+  RcChannels ch{};
+
+  if (tipo == 0) {
+    ok = decodeRc(p, len, ch);
+    if (ok) {
+      rc_ = ch;
+      rcAt_ = millis();
+      rcCount_++;
+    }
+  } else {
+    ok = crcOk(p, len);
+  }
+  if (!ok) return false;
   valid_++;
 
   out = "";
-  char b[4];
+  char b[8];
   for (uint8_t i = 0; i < len; i++) {
     snprintf(b, sizeof(b), "%02X ", p[i]);
     out += b;
   }
 
-  // 2 bits baixos do byte 0 = tipo do pacote
-  const uint8_t tipo = p[0] & 0x03;
   out += '[';
   out += tipo == 0 ? "RCDATA" : tipo == 2 ? "SYNC" : "outro";
   out += ']';
+
+  if (tipo == 0) {
+    snprintf(b, sizeof(b), " %u", ch.ch[0]);
+    out += " A";
+    out += ch.ch[0];
+    out += " E";
+    out += ch.ch[1];
+    out += " T";
+    out += ch.ch[2];
+    out += " R";
+    out += ch.ch[3];
+  }
   return true;
 }
 

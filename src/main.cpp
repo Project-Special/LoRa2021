@@ -271,6 +271,21 @@ void printTelemetry() {
        st.frequencyMHz, bandProfile(st.band).alias,
        st.spreadingFactor, st.bandwidthKHz, st.powerDbm,
        range::role() == range::Role::Tx ? "tx" : "rx");
+
+  // Linha SEPARADA para os canais, e não campos a mais no $T.
+  //
+  // O $T já tem um contrato e um leitor em produção — o app de alcance. Enfiar
+  // seis campos que só existem em modo escuta obrigaria aquele leitor a
+  // conviver com o que não lhe diz respeito, e um dia alguém trataria a
+  // ausência deles como erro. Prefixo próprio: quem não quer, ignora.
+  const uint32_t rcAge = express::rcAgeMs();
+  if (express::rcCount() && rcAge < 5000) {
+    const express::RcChannels& r = express::rc();
+    Serial.printf("$R a=%u e=%u t=%u r=%u sw=%u n=%u age=%lu cnt=%lu\n",
+                  r.ch[0], r.ch[1], r.ch[2], r.ch[3], r.switches, r.nonce,
+                  static_cast<unsigned long>(rcAge),
+                  static_cast<unsigned long>(express::rcCount()));
+  }
 }
 
 void deriveNodeId() {
@@ -881,6 +896,19 @@ void setup() {
   };
   hooks.lostFrames = []() -> uint32_t {
     return range::role() == range::Role::Rx ? range::lost() : 0;
+  };
+  // Canais válidos só existem em modo escuta e com transmissor no ar. 5 s sem
+  // RCDATA e o painel volta a esconder as barras: manche parado numa tela é
+  // indistinguível de manche congelado por falta de dado.
+  hooks.rcChannels = [](uint16_t* ch, uint8_t* sw, uint32_t* age, uint32_t* n) {
+    const uint32_t a = express::rcAgeMs();
+    if (!express::rcCount() || a > 5000) return false;
+    const express::RcChannels& r = express::rc();
+    for (uint8_t i = 0; i < 4; i++) ch[i] = r.ch[i];
+    *sw = r.switches;
+    *age = a;
+    *n = express::rcCount();
+    return true;
   };
   hooks.matchedBand = &matchedBand;
   hooks.peer = &webPeerId;
