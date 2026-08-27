@@ -870,6 +870,18 @@ void setup() {
   hooks.lastSnr = &lastSnr;
   hooks.lastRttMs = &lastRttMs;
   hooks.lastRxMs = &lastRxMs;
+  // O papel decide o que "qualidade de enlace" significa.
+  //
+  // Só o RECEPTOR conta quadros perdidos pela numeração — é ele que sabe o que
+  // faltou. No transmissor esse contador seria sempre 100%, porque ninguém
+  // reporta perda para quem transmite. Devolver 255 ali é dizer "sem medida"
+  // em vez de exibir um 100% que não mede nada.
+  hooks.linkQuality = []() -> uint8_t {
+    return range::role() == range::Role::Rx ? range::lq() : 255;
+  };
+  hooks.lostFrames = []() -> uint32_t {
+    return range::role() == range::Role::Rx ? range::lost() : 0;
+  };
   hooks.matchedBand = &matchedBand;
   hooks.peer = &webPeerId;
   hooks.onRadioChanged = [] { radioprefs::save(radio.state()); };

@@ -166,6 +166,11 @@ String WebConfig::stateJson_() {
   j += "\"rssi\":" + String(hooks_.lastRssi ? *hooks_.lastRssi : 0.0f, 1) + ',';
   j += "\"snr\":" + String(hooks_.lastSnr ? *hooks_.lastSnr : 0.0f, 1) + ',';
   j += "\"rtt\":" + String(hooks_.lastRttMs ? *hooks_.lastRttMs : 0) + ',';
+  // LQ vem como -1 quando não há medida, e não como 0: zero por cento é um
+  // enlace pessimo, "sem medida" e outra coisa. O painel pinta os dois
+  // diferente.
+  j += "\"lq\":" + String(hooks_.linkQuality ? hooks_.linkQuality() : 255) + ',';
+  j += "\"lost\":" + String(hooks_.lostFrames ? hooks_.lostFrames() : 0) + ',';
 
   j += "\"bands\":[";
   for (uint8_t i = 0; i < BAND_COUNT; i++) {

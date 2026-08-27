@@ -34,6 +34,15 @@ class WebConfig {
     float* lastSnr = nullptr;
     uint32_t* lastRttMs = nullptr;
     uint32_t* lastRxMs = nullptr;   // pra decidir se o enlace está vivo
+    // Qualidade de enlace e quadros perdidos, do teste de alcance.
+    //
+    // Por função e não por ponteiro: o LQ é CALCULADO sobre uma janela
+    // deslizante em range_test, não um contador guardado. Expor um ponteiro
+    // obrigaria alguém a manter uma cópia sincronizada — e uma cópia
+    // desatualizada de "qualidade do enlace" é o pior tipo de mentira num
+    // painel de diagnóstico.
+    std::function<uint8_t()> linkQuality;
+    std::function<uint32_t()> lostFrames;
     // Rede de casamento sub-GHz fechada na matriz de solda do módulo. Não é
     // ajuste de rádio: é o firmware sabendo como o hardware está montado.
     uint16_t* matchedBand = nullptr;

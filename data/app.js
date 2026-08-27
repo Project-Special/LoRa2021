@@ -348,6 +348,35 @@ function readout(el, value) {
 
 /* ────────────────────────────────────────────────────────────────  render ── */
 
+/* Qualidade de enlace.
+   255 e a convencao do firmware para "sem medida" — so o RECEPTOR conta
+   perdidos pela numeracao dos quadros, entao no transmissor este numero nao
+   existe. Mostrar 100% ali seria inventar uma medida que ninguem fez.
+
+   Zero por cento e "sem medida" precisam parecer diferentes: um e um enlace
+   pessimo, o outro e a ausencia de informacao. */
+function renderLq(s) {
+  const out = $('lq');
+  const bar = $('lqBar');
+  const note = $('lqNote');
+  const v = s.lq;
+
+  if (v === undefined || v === null || v > 100) {
+    out.textContent = '––';
+    out.dataset.none = '1';
+    bar.style.width = '0%';
+    note.textContent = s.node ? 'so o receptor mede LQ — este no e transmissor' : '·';
+    return;
+  }
+
+  out.textContent = v;
+  delete out.dataset.none;
+  bar.style.width = v + '%';
+  note.textContent =
+    (s.lost ? s.lost + ' quadro(s) perdido(s)' : 'nenhum quadro perdido') +
+    ' · ' + s.rx + ' recebidos';
+}
+
 function render(s, force = false) {
   document.documentElement.dataset.band = s.band;
 
@@ -365,6 +394,8 @@ function render(s, force = false) {
     while (history.length > HIST) history.shift();
     drawChart();
   }
+
+  renderLq(s);
 
   $('toa').textContent = s.toa;
   readout($('tx'), s.tx);

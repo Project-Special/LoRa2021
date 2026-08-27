@@ -117,6 +117,19 @@
       </div>
 
       <!-- contadores: ocupam o vazio que sobrava no alto à direita -->
+      <!-- Mostrador de LQ, portado de tools/serial.
+           O ponteiro conta a INTENSIDADE do sinal; o LQ conta quantos quadros
+           chegaram. Sao coisas diferentes e uma nao substitui a outra: -60 dBm
+           com LQ 40% e interferencia, e -110 dBm com LQ 100% e um enlace fraco
+           porem limpo. Sem este numero o painel so mostrava metade da
+           historia. -->
+      <div class="gauge">
+        <div class="gauge__lb">QUALIDADE DE ENLACE</div>
+        <div class="gauge__val"><output id="lq">––</output><span>%</span></div>
+        <div class="meter"><i id="lqBar" style="width:0%"></i></div>
+        <p class="gauge__note" id="lqNote">·</p>
+      </div>
+
       <dl class="counters">
         <div><dt>Enviados</dt><dd id="tx">0</dd></div>
         <div><dt>Recebidos</dt><dd id="rx">0</dd></div>
