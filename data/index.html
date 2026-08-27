@@ -57,6 +57,7 @@
        por que. -->
   <nav class="tabs" role="tablist">
     <button class="tabs__b" id="tabBench" role="tab" aria-selected="true">Bancada</button>
+    <button class="tabs__b" id="tabGauges" role="tab" aria-selected="false">Mostradores</button>
     <button class="tabs__b" id="tabDb" role="tab" aria-selected="false">Banco de dados</button>
   </nav>
 
@@ -117,19 +118,6 @@
       </div>
 
       <!-- contadores: ocupam o vazio que sobrava no alto à direita -->
-      <!-- Mostrador de LQ, portado de tools/serial.
-           O ponteiro conta a INTENSIDADE do sinal; o LQ conta quantos quadros
-           chegaram. Sao coisas diferentes e uma nao substitui a outra: -60 dBm
-           com LQ 40% e interferencia, e -110 dBm com LQ 100% e um enlace fraco
-           porem limpo. Sem este numero o painel so mostrava metade da
-           historia. -->
-      <div class="gauge">
-        <div class="gauge__lb">QUALIDADE DE ENLACE</div>
-        <div class="gauge__val"><output id="lq">––</output><span>%</span></div>
-        <div class="meter"><i id="lqBar" style="width:0%"></i></div>
-        <p class="gauge__note" id="lqNote">·</p>
-      </div>
-
       <dl class="counters">
         <div><dt>Enviados</dt><dd id="tx">0</dd></div>
         <div><dt>Recebidos</dt><dd id="rx">0</dd></div>
@@ -261,6 +249,42 @@
   </section>
 
   </div><!-- /viewBench -->
+
+  <!-- ═══════════════════════════════════════════════════════ mostradores ═ -->
+  <!-- Vista de RELANCE, portada de tools/serial.
+       A Bancada e densa de proposito: e onde se ajusta e se diagnostica. Mas
+       durante um teste de alcance ninguem esta ajustando nada — esta olhando de
+       longe, muitas vezes de pe ao lado da placa, para saber se o enlace ainda
+       existe. Numero grande com barra embaixo se le a metros; um grafico de
+       90 s e uma grade de controles, nao. -->
+  <section class="panel panel--gauges" id="viewGauges" hidden>
+    <h2 class="panel__t">Mostradores<span class="silk" id="gWho">·</span></h2>
+
+    <div class="gauges">
+      <div class="gauge">
+        <div class="gauge__lb">SINAL RECEBIDO</div>
+        <div class="gauge__val"><output id="gRssi">–––.–</output><span>dBm</span></div>
+        <div class="meter"><i id="gRssiBar" style="width:0%"></i></div>
+        <p class="gauge__note" id="gRssiNote">·</p>
+      </div>
+
+      <div class="gauge">
+        <div class="gauge__lb">QUALIDADE DE ENLACE</div>
+        <div class="gauge__val"><output id="lq">––</output><span>%</span></div>
+        <div class="meter"><i id="lqBar" style="width:0%"></i></div>
+        <p class="gauge__note" id="lqNote">·</p>
+      </div>
+    </div>
+
+    <div class="gdigits">
+      <div class="gdigits__row"><span>SNR</span><b id="gSnr">––.–</b><i>dB</i></div>
+      <div class="gdigits__row"><span>Tempo no ar</span><b id="gToa">–––</b><i>ms</i></div>
+      <div class="gdigits__row"><span>Potência</span><b id="gPwr">––</b><i>dBm</i></div>
+      <div class="gdigits__row"><span>Frequência</span><b id="gFreq">–––.–––</b><i>MHz</i></div>
+      <div class="gdigits__row"><span>Recebidos</span><b id="gRx">0</b><i></i></div>
+      <div class="gdigits__row"><span>Perdidos</span><b id="gLost">0</b><i></i></div>
+    </div>
+  </section>
 
   <!-- ═══════════════════════════════════════════════════════ banco ═════ -->
   <section class="panel panel--db" id="viewDb" hidden>

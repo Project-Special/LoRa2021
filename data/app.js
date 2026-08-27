@@ -377,6 +377,40 @@ function renderLq(s) {
     ' · ' + s.rx + ' recebidos';
 }
 
+/* Mostradores da aba de relance.
+   Reaproveita a MESMA escala do ponteiro (DBM_LO/DBM_HI): duas leituras do
+   mesmo RSSI na mesma pagina discordarem sobre o que e "meio" seria pior que
+   nao mostrar nenhuma das duas. */
+function renderGauges(s) {
+  renderLq(s);
+
+  const out = $('gRssi');
+  const bar = $('gRssiBar');
+  const note = $('gRssiNote');
+
+  // rx === 0 e "nenhum quadro ainda", nao "sinal de zero". O firmware emite
+  // rssi=0.0 ate o primeiro quadro chegar, e zero dBm nao existe em LoRa.
+  if (!s.rx || s.rssi >= 0) {
+    out.textContent = '–––.–';
+    out.dataset.none = '1';
+    bar.style.width = '0%';
+    note.textContent = 'nenhum quadro recebido ainda';
+  } else {
+    out.textContent = s.rssi.toFixed(1);
+    delete out.dataset.none;
+    bar.style.width = (frac(s.rssi) * 100).toFixed(1) + '%';
+    note.textContent = s.linked ? 'enlace ativo' : 'ultima leitura — enlace caiu';
+  }
+
+  $('gSnr').textContent = s.rx ? s.snr.toFixed(1) : '––.–';
+  $('gToa').textContent = s.toa;
+  $('gPwr').textContent = s.power;
+  $('gFreq').textContent = Number(s.freq).toFixed(3);
+  $('gRx').textContent = s.rx;
+  $('gLost').textContent = s.lost === undefined ? '–' : s.lost;
+  $('gWho').textContent = (s.node || '····') + ' · ' + (s.band || '—');
+}
+
 function render(s, force = false) {
   document.documentElement.dataset.band = s.band;
 
@@ -395,7 +429,7 @@ function render(s, force = false) {
     drawChart();
   }
 
-  renderLq(s);
+  renderGauges(s);
 
   $('toa').textContent = s.toa;
   readout($('tx'), s.tx);
@@ -927,12 +961,15 @@ async function renderDbMap() {
    bancada, e o registro tem de estar completo quando se voltar. */
 function showTab(which) {
   const db = which === 'db';
+  const g = which === 'gauges';
   // Sair da aba com o mapa expandido deixaria um mapa fixed cobrindo a
   // bancada, sem nada visível para fechá-lo.
   if (!db && typeof mapIsFull === 'function' && mapIsFull()) setMapFull(false);
-  $('tabBench').setAttribute('aria-selected', String(!db));
+  $('tabBench').setAttribute('aria-selected', String(!db && !g));
+  $('tabGauges').setAttribute('aria-selected', String(g));
   $('tabDb').setAttribute('aria-selected', String(db));
-  $('viewBench').hidden = db;
+  $('viewBench').hidden = db || g;
+  $('viewGauges').hidden = !g;
   $('viewDb').hidden = !db;
 
   if (db) {
@@ -948,6 +985,7 @@ function showTab(which) {
 }
 
 $('tabBench').addEventListener('click', () => showTab('bench'));
+$('tabGauges').addEventListener('click', () => showTab('gauges'));
 $('tabDb').addEventListener('click', () => showTab('db'));
 $('dbReload').addEventListener('click', () => { DB.list = []; void dbLoadList(); });
 

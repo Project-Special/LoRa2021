@@ -978,3 +978,48 @@ input:focus, select:focus {
   font-size: var(--t-mini);
   color: var(--ink-far);
 }
+
+/* ═════════════════════════════════════════════════════ aba mostradores ══ */
+.panel--gauges { margin-top: 16px; }
+.panel--gauges[hidden] { display: none; }
+.panel--gauges .panel__t span { margin-left: auto; letter-spacing: .14em; }
+
+/* Lado a lado no largo, empilhados no estreito. Um mostrador espremido a
+   metade da largura de um celular perde o tamanho, que é o único motivo de
+   ele existir. */
+.gauges {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 22px;
+  margin-bottom: 22px;
+}
+
+.panel--gauges .gauge__val output { font-size: clamp(44px, 9vw, 76px); }
+.panel--gauges .meter { height: 14px; }
+
+.gdigits {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--rule);
+}
+
+.gdigits__row { display: flex; align-items: baseline; gap: 8px; }
+
+.gdigits__row span {
+  min-width: 92px;
+  font-size: var(--t-micro);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink-far);
+}
+
+.gdigits__row b {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.gdigits__row i { font-style: normal; font-size: var(--t-mini); color: var(--ink-far); }
