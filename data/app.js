@@ -1673,9 +1673,26 @@ async function pollRc() {
   }
 }
 
+/* Cadencia da enquete de canais.
+   50 ms sao VINTE requisicoes por segundo. Pela serial isso e local e barato;
+   pelo WiFi vai tudo para um ESP32 que ao mesmo tempo roda o radio -- e como a
+   aba Mostradores comeca a enquete assim que abre, ela disputava banda com o
+   proprio carregamento da pagina. Resultado observado: o navegador desistia do
+   style.css e o painel aparecia sem estilo nenhum, com o resto funcionando.
+   Pela rede, 10 Hz: mais que suficiente para acompanhar manche, metade do peso. */
+const RC_MS = () => (LINK.mode === 'http' ? 100 : 50);
+
 function setRcFast(on) {
-  if (on && !rcTimer) rcTimer = setInterval(pollRc, 50);
-  else if (!on && rcTimer) { clearInterval(rcTimer); rcTimer = null; }
+  if (on && !rcTimer) {
+    // Espera a pagina TERMINAR de carregar antes de comecar a pedir. Enquanto
+    // ha folha de estilo e script em voo, a enquete e o que os atropela.
+    const armar = () => { if (!rcTimer) rcTimer = setInterval(pollRc, RC_MS()); };
+    if (document.readyState === 'complete') armar();
+    else window.addEventListener('load', armar, { once: true });
+  } else if (!on && rcTimer) {
+    clearInterval(rcTimer);
+    rcTimer = null;
+  }
 }
 
 $('tabBench').addEventListener('click', () => showTab('bench'));

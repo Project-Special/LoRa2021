@@ -67,6 +67,16 @@ static void HandlePainelRc(AsyncWebServerRequest *request)
 static void HandlePainelFile(AsyncWebServerRequest *request)
 {
   const String u = request->url();
+
+  // Se o navegador ja tem o arquivo desta compilacao, nao ha o que enviar.
+  static const char etagAtual[] = "\"" __DATE__ __TIME__ "\"";
+  if (request->hasHeader("If-None-Match") &&
+      request->header("If-None-Match") == etagAtual)
+  {
+    request->send(304);
+    return;
+  }
+
   const uint8_t *dados = painel_index_html;
   size_t tam = painel_index_html_len;
   const char *tipo = "text/html";
@@ -80,6 +90,16 @@ static void HandlePainelFile(AsyncWebServerRequest *request)
   AsyncWebServerResponse *r = request->beginResponse_P(200, tipo, dados, tam);
   // O conteudo esta gzipado no flash; quem descomprime e o navegador.
   r->addHeader("Content-Encoding", "gzip");
+
+  // Cache com validacao pela COMPILACAO.
+  //
+  // Sao ~49 kB de painel, e sem cabecalho de cache o navegador rebaixava tudo a
+  // cada recarga -- por um AP que divide a CPU com o radio. O ETag e a data da
+  // compilacao: muda a cada gravacao, entao painel novo nunca fica escondido
+  // atras de cache velho, e recarga sem mudanca responde 304 e nao trafega nada.
+  static const char etag[] = "\"" __DATE__ __TIME__ "\"";
+  r->addHeader("Cache-Control", "public, max-age=86400, must-revalidate");
+  r->addHeader("ETag", etag);
   request->send(r);
 }
 
