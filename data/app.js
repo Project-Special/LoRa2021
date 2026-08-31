@@ -330,6 +330,20 @@ function buildMatch() {
 }
 
 /** Escreve só se o usuário não estiver mexendo no campo. */
+// Escrita que IGNORA o estado "mexido pelo usuario".
+//
+// put() respeita `dirty` para nao apagar o que alguem esta digitando. Isso vale
+// para campos que SAO ajustes. No ExpressLRS, frequencia/SF/BW/CR nao sao: saem
+// da taxa escolhida. Um toque acidental num deles os marcava como sujos para
+// sempre, e a partir dali paravam de refletir o radio -- ficavam mostrando
+// 812,5 kHz numa placa ja operando em 500.
+function putSempre(el, value) {
+  if (!el) return;
+  const v = value === undefined || value === null ? '·' : value;
+  if ('value' in el) el.value = v;
+  else el.textContent = v;
+}
+
 function put(el, value) {
   if (dirty.has(el.id) || document.activeElement === el) return;
   if (el.type === 'checkbox') el.checked = !!value;
@@ -365,7 +379,12 @@ function renderLq(s) {
     out.textContent = '––';
     out.dataset.none = '1';
     bar.style.width = '0%';
-    note.textContent = s.node ? 'so o receptor mede LQ — este no e transmissor' : '·';
+    // Quem NAO mede LQ e o transmissor; o receptor sem enlace simplesmente nao
+    // tem o que medir. Distinguir pelo papel (tlm < 0 e receptor), nao por
+    // s.node existir -- isso dava "este no e transmissor" numa placa ELRS RX.
+    note.textContent = (s.tlm !== undefined && s.tlm < 0)
+      ? 'sem enlace — nenhum quadro chegando'
+      : (s.node ? 'so o receptor mede LQ — este no e transmissor' : '·');
     return;
   }
 
@@ -389,9 +408,10 @@ function renderGauges(s) {
   const bar = $('gRssiBar');
   const note = $('gRssiNote');
 
-  // rx === 0 e "nenhum quadro ainda", nao "sinal de zero". O firmware emite
-  // rssi=0.0 ate o primeiro quadro chegar, e zero dBm nao existe em LoRa.
-  if (!s.rx || s.rssi >= 0) {
+  // Campo AUSENTE e "nenhuma leitura", nao "sinal de zero" -- e zero dBm nao
+  // existe em LoRa, entao rssi >= 0 tambem e ausencia. Nao olha mais `s.rx`:
+  // essa chave passou a reportar a cadencia configurada, e nao quadros vistos.
+  if (!Number.isFinite(s.rssi) || s.rssi >= 0) {
     out.textContent = '–––.–';
     out.dataset.none = '1';
     bar.style.width = '0%';
@@ -403,16 +423,447 @@ function renderGauges(s) {
     note.textContent = s.linked ? 'enlace ativo' : 'ultima leitura — enlace caiu';
   }
 
-  $('gSnr').textContent = s.rx ? s.snr.toFixed(1) : '––.–';
-  $('gToa').textContent = s.toa;
-  $('gPwr').textContent = s.power;
-  $('gFreq').textContent = Number(s.freq).toFixed(3);
-  $('gRx').textContent = s.rx;
-  $('gLost').textContent = s.lost === undefined ? '–' : s.lost;
+  // Campo AUSENTE vira traco, nao zero.
+  //
+  // O receptor ExpressLRS nao mede potencia nem tempo no ar, e antes esses
+  // campos vinham como 0 — a tela afirmava "potencia 0 dBm" e "tempo no ar
+  // 0 ms", numeros que ninguem mediu. Ausente e diferente de zero, e a tela
+  // precisa dizer qual dos dois e.
+  const tr = (v, casas) =>
+    v === undefined || v === null || !Number.isFinite(Number(v))
+      ? '–––'
+      : casas === undefined ? String(v) : Number(v).toFixed(casas);
+
+  $('gSnr').textContent = s.snr === undefined ? '––.–' : Number(s.snr).toFixed(1);
+  $('gToa').textContent = tr(s.toa);
+  $('gPwr').textContent = tr(s.power);
+  $('gFreq').textContent = tr(s.freq, 3);
+  $('gRx').textContent = tr(s.rx);
+  $('gLost').textContent = tr(s.lost);
   $('gWho').textContent = (s.node || '····') + ' · ' + (s.band || '—');
 }
 
+/* Esconde o que ESTE firmware nao tem, em vez de exibir campo vazio.
+   O painel nasceu para o firmware de bancada; rodando no ExpressLRS, metade
+   dos conceitos nao existe -- nao ha rede de casamento, nem par de teste, nem
+   frase guardada (ela vira UID na gravacao). Campo vazio sem explicacao e pior
+   que campo ausente: parece defeito, e manda o operador procurar problema onde
+   nao ha. */
+/* Distribuicao das colunas por FIRMWARE.
+   O arranjo original serve a bancada: banda a esquerda, modem no meio, trafego
+   a direita. No ExpressLRS ele desanda -- a coluna 1 acumula banda, plano, taxa
+   e telemetria enquanto a 3 fica cheia de controles que aquele firmware nao
+   atende (mensagem, ping, beacon nao existem nele). Sobra rolagem de um lado e
+   vazio do outro.
+   Aqui as pecas mudam de coluna uma unica vez, e so nesse caso:
+     1 · Banda + Plano     2 · Enlace (taxa, telemetria)     3 · Modem
+   A bancada nao e tocada. */
+let colunasArrumadas = false;
+
+function arrumarColunas(elrs) {
+  if (!elrs || colunasArrumadas) return;
+  const col2 = $('pCol2'), col3 = $('pCol3');
+  const modem = $('secModem'), taxa = $('secTaxa'), tlm = $('secTlm'), traf = $('secTrafego');
+  if (!col2 || !col3 || !modem) return;
+
+  if ($('tCol2')) $('tCol2').textContent = 'Enlace';
+  if ($('tCol3')) $('tCol3').textContent = 'Modem';
+  if (taxa) col2.appendChild(taxa);
+  // A potencia GRAVA -- pertence a coluna dos controles, nao a das leituras.
+  if ($('fPowerSel')) col2.appendChild($('fPowerSel'));
+  if ($('powerHint')) col2.appendChild($('powerHint'));
+  if (tlm) col2.appendChild(tlm);
+  col3.appendChild(modem);
+  if ($('specModem')) col3.appendChild($('specModem'));
+  // Os controles de trafego somem: no ExpressLRS nao ha rota que os atenda, e
+  // botao que nao faz nada e pior que botao ausente.
+  if (traf) traf.hidden = true;
+  colunasArrumadas = true;
+}
+
+function ajustarSecoes(s) {
+  const tem = (k) => s[k] !== undefined && s[k] !== null;
+  const arr = (k) => Array.isArray(s[k]) && s[k].length > 0;
+
+  const mostra = (id, on) => { const e = $(id); if (e) e.hidden = !on; };
+
+  mostra('secPeer', arr('peerOpts'));
+  mostra('secBind', tem('phrase'));
+  // O UID vem sempre e identifica o par; a FRASE nao e guardada pelo firmware.
+  // Escondia-se o bloco inteiro e o UID ia junto, sem motivo.
+  mostra('secUid', tem('uid'));
+  // 'Perdidos' e o painel Registro nao existem no ExpressLRS: o firmware manda
+  // lost:0 e log:[] fixos. Zero eterno parece medida; e campo vazio.
+  const ehElrs = String(s.node || '').indexOf('ELRS') === 0;
+  const celLost = $('gLost') && $('gLost').closest('div');
+  if (celLost) celLost.hidden = ehElrs;
+  mostra('secHw', arr('matchOpts'));
+  mostra('bands', arr('bands') || !s.node || String(s.node).indexOf('ELRS') !== 0);
+
+
+  // Contadores do protocolo proprio. No ExpressLRS quem conta pacote e o LQ, e
+  // "enviados/CRC ruim/ida e volta" simplesmente nao tem equivalente.
+  // "Recebidos" no ExpressLRS e a CADENCIA da taxa, nao quadros contados -- o
+  // firmware manda 1000000/interval. Rotular de outro jeito era mostrar 50 numa
+  // placa parada e chamar isso de recepcao.
+  const rotRx = $('rx') && $('rx').previousElementSibling;
+  if (rotRx) rotRx.textContent = String(s.node || '').indexOf('ELRS') === 0
+    ? 'Cadência · Hz' : 'Recebidos';
+
+  for (const [id, k] of [['tx','tx'], ['err','err'], ['rtt','rtt']]) {
+    const cel = $(id) && $(id).closest('div');
+    if (cel) cel.hidden = !tem(k) || String(s.node || '').indexOf('ELRS') === 0;
+  }
+}
+
+/* Razao de telemetria. Os indices sao os do expresslrs_tlm_ratio_e; a ordem
+   importa e nao pode ser reordenada aqui sem mexer no firmware. */
+const TLM_OPCOES = [
+  [1, 'Desligada'],
+  [0, 'Padrao da taxa'],
+  [2, '1:128  (leve)'],
+  [3, '1:64'],
+  [4, '1:32'],
+  [5, '1:16'],
+  [6, '1:8'],
+  [7, '1:4'],
+  [8, '1:2  (rapida, ocupa metade do ar)'],
+  [9, 'So desarmado'],
+];
+
+let tlmMontado = false;
+
+/* Taxa de pacote -- e, junto com ela, a banda.
+   A lista vem do FIRMWARE (s.rates), nao daqui: o painel vive dentro dele, e
+   uma tabela duplicada ficaria errada no dia em que as taxas mudassem. */
+let taxaMontada = false;
+
+/* Banda, plano e taxa sao TRES coisas e o painel as mostrava soltas: o
+   seletor de plano listava so o lado sub-GHz, e 2,4 GHz nao aparecia em lugar
+   nenhum porque nao e um "plano" -- e uma tabela fixa. Quem opera nao pensa
+   assim: pensa "quero 433", "quero 915", "quero 2,4". A banda passa a ser o
+   controle de cima, e plano e taxa se filtram por ela. */
+const BANDAS_USO = [
+  { id: '433', nome: '433 MHz' },
+  { id: '915', nome: '915 MHz' },
+  { id: '2g4', nome: '2,4 GHz' },
+];
+
+/* Em qual banda cai um plano de salto, pela frequencia central que o firmware
+   informa. Evita repetir aqui a tabela de dominios do ExpressLRS. */
+function bandaDoPlano(mhz) {
+  if (mhz < 460) return '433';   // 460, nao 500: CN470 tem centro em 490 MHz
+  if (mhz < 600) return '470';
+  if (mhz < 900) return '868';
+  return '915';
+}
+
+let bandaMontada = false;
+
+function renderBanda(s) {
+  // Banda nos DOIS lados, e nos dois ela grava na flash.
+  //
+  //   TX -> taxa de transmissao + plano. E o que ele anuncia no SYNC.
+  //   RX -> taxa INICIAL de busca + plano. O receptor comeca por ela e insiste
+  //         antes de varrer as outras.
+  //
+  // Enquanto o par estiver ligado o SYNC manda: o receptor segue o transmissor.
+  // A escolha do receptor vale no BOOT e quando o enlace cai -- e e ela que
+  // decide em qual banda ele passa a maior parte do tempo procurando.
+  const taxas = Array.isArray(s.rates) ? s.rates : [];
+  const doms = Array.isArray(s.domains) ? s.domains : [];
+  const subG = taxas.filter((r) => r.b !== '2g4');
+  const g24 = taxas.filter((r) => r.b === '2g4');
+
+  // As bandas vem dos PLANOS, nao das taxas.
+  //
+  // Cada taxa sub-GHz e rotulada com a banda do plano ATIVO -- em 433 todas
+  // dizem "433". Montar a lista a partir delas fazia 915 nunca aparecer, porque
+  // so apareceria depois de ja estar em 915. Os planos, ao contrario, existem
+  // todos o tempo todo, independentes do que esta em uso.
+  const disp = BANDAS_USO.filter((b) =>
+    b.id === '2g4' ? g24.length > 0
+                   : subG.length > 0 && doms.some((d) => bandaDoPlano(d.mhz) === b.id));
+
+  // Se a placa estiver numa banda fora da lista curta, ela entra: a tela tem de
+  // dizer onde o radio ESTA, e nao so onde e comum estar.
+  if (s.band && !disp.some((b) => b.id === s.band)) {
+    disp.push({ id: s.band, nome: `${s.band} MHz` });
+  }
+
+  const cx = $('secBanda');
+  if (cx) cx.hidden = disp.length < 2;
+  if (disp.length < 2) return;
+
+  const el = $('banda');
+  const assinatura = disp.map((b) => b.id).join('|');
+
+  if (!bandaMontada || el.dataset.sig !== assinatura) {
+    el.innerHTML = '';
+    for (const b of disp) {
+      // "fora da faixa" sai do que o firmware disse sobre os planos daquela
+      // banda -- nao de um palpite do painel.
+      const plano = doms.find((d) => bandaDoPlano(d.mhz) === b.id);
+      const fora = b.id !== '2g4' && plano && plano.ok === false;
+      const o = document.createElement('option');
+      o.value = b.id;
+      o.textContent = b.nome + (fora ? '  — fora da faixa do módulo' : '');
+      if (fora) o.dataset.fora = '1';
+      el.appendChild(o);
+    }
+    el.dataset.sig = assinatura;
+
+    if (!bandaMontada) {
+      el.addEventListener('change', async () => {
+        const alvo = el.value;
+        const opt = el.options[el.selectedIndex];
+        // A taxa mais LENTA da banda de destino: e a de maior alcance, que e o
+        // que esta bancada mede. Ajusta-se depois no seletor de taxa.
+        const cand = (alvo === '2g4' ? g24 : subG).slice().sort((x, y) => x.hz - y.hz);
+        if (!cand.length) { log('err', `sem taxa disponível em ${opt.textContent}`); return; }
+        const corpo = { rate: cand[0].i };
+        if (alvo !== '2g4') {
+          const plano = doms.find((d) => bandaDoPlano(d.mhz) === alvo && d.ok !== false)
+                     || doms.find((d) => bandaDoPlano(d.mhz) === alvo);
+          if (plano) corpo.domain = plano.i;
+        }
+
+        if (opt.dataset.fora) {
+          log('err', `${opt.textContent} — o rádio sintoniza, mas a antena do módulo não casa aí`);
+        }
+        try {
+          await api('api/config', corpo);
+          log('sys', `banda: ${opt.textContent} · ${cand[0].hz} Hz — placa reiniciando`);
+        } catch (e) {
+          log('err', `falha ao mudar a banda: ${e.message}`);
+        }
+      });
+      bandaMontada = true;
+    }
+  }
+  if (document.activeElement !== el && s.band) el.value = s.band;
+}
+
+let domMontado = false;
+
+function renderDominios(s) {
+  // Planos sao coisa do lado sub-GHz. Em 2,4 GHz existe um so, fixo, e um
+  // seletor de um item unico e ruido -- por isso a secao some ali.
+  const todos = Array.isArray(s.domains) ? s.domains : [];
+  const ehRx = s.tlm !== undefined && s.tlm < 0;
+
+  // Os planos da banda selecionada logo acima. Em 2,4 GHz nao aparece: la
+  // existe um plano so, e um seletor de item unico e ruido.
+  const lista = todos.filter((d) => bandaDoPlano(d.mhz) === s.band);
+  const tem = lista.length > 1 && s.band !== '2g4';
+  const cx = $('secDominio');
+  if (cx) cx.hidden = !tem;
+  const nota = $('planoNota');
+  if (nota) {
+    nota.textContent = 'Em quais canais as taxas sub-GHz saltam. Gravado na flash desta placa e mantido no reset. A OUTRA ponta precisa do mesmo plano — o plano não viaja no pacote de sincronismo.'
+      + (ehRx ? ' Com o par ligado, a banda em uso segue o transmissor; esta escolha vale no boot e sempre que o enlace cai.' : '');
+  }
+  if (!tem) return;
+
+  const el = $('dominio');
+  const assinatura = lista.map((d) => `${d.i}:${d.nome}`).join('|');
+  if (!domMontado || el.dataset.sig !== assinatura) {
+    el.innerHTML = '';
+    for (const d of lista) {
+      const o = document.createElement('option');
+      o.value = String(d.i);
+      // Plano que o modulo nao casa continua VISIVEL, e marcado. Esconder
+      // faria a lista mentir sobre o que o firmware sabe fazer; deixar sem
+      // marca faria o operador escolher e culpar o alcance.
+      o.textContent = `${d.nome} · ${d.mhz} MHz · ${d.ch} canais`
+        + (d.ok === false ? '  — fora da faixa do módulo' : '');
+      if (d.ok === false) o.dataset.fora = '1';
+      el.appendChild(o);
+    }
+    el.dataset.sig = assinatura;
+    if (!domMontado) {
+      el.addEventListener('change', async () => {
+        const opt = el.options[el.selectedIndex];
+        const nome = opt.textContent;
+        if (opt.dataset.fora) {
+          log('err', `${nome} — o rádio sintoniza, mas a antena do módulo não casa aí`);
+        }
+        try {
+          await api('api/config', { domain: el.value });
+          log('sys', `plano: ${nome} — placa reiniciando, a OUTRA ponta precisa do mesmo`);
+        } catch (e) {
+          log('err', `falha ao mudar o plano: ${e.message}`);
+        }
+      });
+      domMontado = true;
+    }
+  }
+  if (document.activeElement !== el && s.domain !== undefined) el.value = String(s.domain);
+}
+
+function renderTaxas(s) {
+  // So as taxas da banda em uso. Misturar as duas bandas numa lista so foi o
+  // que tornou o controle confuso: a taxa carrega a banda junto, e ver "2,4
+  // GHz 500 Hz" numa placa operando em 433 convida ao clique errado.
+  const lista = Array.isArray(s.rates) ? s.rates.filter((r) => r.b === s.band) : [];
+  // Aparece nos DOIS. No receptor a taxa grava como taxa INICIAL de busca --
+  // por onde ele comeca a procurar o transmissor dentro da banda escolhida.
+  const cx = $('secTaxa');
+  if (cx) cx.hidden = lista.length < 2;
+  if (lista.length < 2) return;
+  const el = $('taxa');
+  // A nota muda com o papel: no receptor a taxa e so o ponto de PARTIDA da
+  // busca -- o SYNC a substitui assim que o par fecha.
+  const nt = $('taxaNota');
+  if (nt) {
+    nt.textContent = (s.tlm !== undefined && s.tlm < 0)
+      ? 'Por qual taxa este receptor começa a procurar o transmissor, dentro da banda escolhida. Com o par fechado, quem manda é a taxa que vem no pacote de sincronismo.'
+      : 'No ExpressLRS a banda não é um ajuste separado: cada taxa já nasce numa banda. Trocar aqui troca as duas — e as DUAS pontas precisam da mesma.';
+  }
+
+  const rotulo = (r) => `${r.hz} Hz${r.c8 ? ' · 8 canais' : ''}`;
+
+  const assinatura = lista.map((r) => `${r.i}:${r.b}:${r.hz}`).join('|');
+  if (!taxaMontada || el.dataset.sig !== assinatura) {
+    el.innerHTML = '';
+    for (const r of lista) {
+      const o = document.createElement('option');
+      o.value = String(r.i);
+      o.textContent = rotulo(r);
+      el.appendChild(o);
+    }
+    el.dataset.sig = assinatura;
+    if (!taxaMontada) {
+      el.addEventListener('change', async () => {
+        const nome = el.options[el.selectedIndex].textContent;
+        try {
+          const st = await api('api/config', { rate: el.value });
+          render(st, true);
+          log('sys', `taxa: ${nome} — a OUTRA ponta precisa da mesma`);
+        } catch (e) {
+          log('err', `falha ao mudar a taxa: ${e.message}`);
+        }
+      });
+      taxaMontada = true;
+    }
+  }
+  if (document.activeElement !== el && s.rate !== undefined) el.value = String(s.rate);
+}
+
+/* Potencia. A lista vem do firmware com o dBm MEDIDO de cada nivel -- os
+   valores do datasheet do modulo, nao o rotulo do nivel do ExpressLRS. */
+let potMontada = false;
+
+function renderPotencias(s) {
+  const tem = Array.isArray(s.powers) && s.powers.length > 0;
+  const cx = $('fPowerSel');
+  if (cx) cx.hidden = !tem;
+  const antigo = $('fPower');
+  if (antigo) antigo.hidden = tem;
+  if (!tem) return;
+
+  const el = $('powerSel');
+  const assinatura = s.powers.map((x) => `${x.i}:${x.dbm}`).join('|');
+  if (!potMontada || el.dataset.sig !== assinatura) {
+    el.innerHTML = '';
+    for (const x of s.powers) {
+      const o = document.createElement('option');
+      o.value = String(x.i);
+      o.textContent = `${x.dbm} dBm`;
+      el.appendChild(o);
+    }
+    el.dataset.sig = assinatura;
+    if (!potMontada) {
+      el.addEventListener('change', async () => {
+        try {
+          const st = await api('api/config', { pwr: el.value });
+          render(st, true);
+          log('sys', `potencia: ${el.options[el.selectedIndex].textContent}`);
+        } catch (e) {
+          log('err', `falha ao mudar a potencia: ${e.message}`);
+        }
+      });
+      potMontada = true;
+    }
+  }
+  // Casa pelo dBm em uso, que e o que o firmware reporta.
+  if (document.activeElement !== el) {
+    const atual = s.powers.find((x) => Math.abs(x.dbm - s.power) < 0.05);
+    if (atual) el.value = String(atual.i);
+  }
+}
+
+function renderTlm(s) {
+  // tlm === -1 e o receptor: ele NAO tem razao configurada, obedece ao que vem
+  // no pacote de SYNC. Mostrar um seletor la seria um controle que nao controla
+  // nada -- fica so o estado, que ainda assim vale muito: e a prova, medida na
+  // outra ponta, de que o transmissor mandou telemetria ligar.
+  const tem = s.tlm !== undefined && s.tlm !== null;
+  $('secTlm').hidden = !tem;
+  if (!tem) return;
+
+  const el = $('tlm');
+  const configuravel = s.tlm >= 0;
+  // Esconder so o <select> deixava o .field vazio ocupando espaco, com um vao
+  // entre o titulo e a linha "em uso".
+  if ($('fTlm')) $('fTlm').hidden = !configuravel;
+  const notaTlm = $('tlmNota');
+  if (notaTlm) {
+    notaTlm.textContent = configuravel
+      ? 'Sem telemetria o transmissor não sabe o que a outra ponta ouve — RSSI, SNR e LQ ficam sem leitura no painel dele. Razões mais frequentes devolvem os números mais rápido e ocupam mais ar.'
+      : 'A razão é decidida pelo transmissor e chega aqui no pacote de sincronismo. Este painel mostra qual está valendo.';
+  }
+
+  // O denominador efetivo: 1 significa "um pacote de subida para cada um", ou
+  // seja, nenhuma janela de volta -- telemetria desligada.
+  const d = s.tlmDenom;
+  const efetiva = !(d > 1) ? 'desligada'
+    : '1:' + d + (configuravel && s.tlm === 0 ? '  (padrao desta taxa)' : '');
+  $('tlmEf').textContent = d === undefined ? '--' : efetiva;
+
+  if (!configuravel) return;
+
+  if (!tlmMontado) {
+    el.innerHTML = '';
+    for (const [v, nome] of TLM_OPCOES) {
+      const o = document.createElement('option');
+      o.value = String(v);
+      o.textContent = nome;
+      el.appendChild(o);
+    }
+    el.addEventListener('change', async () => {
+      try {
+        const st = await api('api/config', { tlm: el.value });
+        render(st, true);
+        log('sys', 'telemetria: ' + el.options[el.selectedIndex].textContent);
+      } catch (e) {
+        log('err', 'falha ao mudar telemetria: ' + e.message);
+      }
+    });
+    tlmMontado = true;
+  }
+  // So escreve quando NAO esta com foco: sobrescrever a escolha do usuario
+  // enquanto ele mexe no seletor e a forma mais rapida de tornar um controle
+  // impossivel de usar.
+  if (document.activeElement !== el) el.value = String(s.tlm);
+}
+
+let truncAvisado = false;
+
 function render(s, force = false) {
+  // O firmware avisa quando o estado nao coube inteiro. Sem esse aviso, um
+  // campo ausente e indistinguivel de um campo sem leitura.
+  if (s.trunc && !truncAvisado) {
+    truncAvisado = true;
+    log('err', 'estado truncado pelo firmware — campos podem estar faltando');
+  }
+
+  ajustarSecoes(s);
+  renderBanda(s);
+  renderDominios(s);
+  renderTaxas(s);
+  renderPotencias(s);
+  renderTlm(s);
   document.documentElement.dataset.band = s.band;
 
   $('node').textContent = s.node;
@@ -421,13 +872,38 @@ function render(s, force = false) {
   link.dataset.state = s.linked ? 'on' : 'off';
   $('linkTxt').textContent = s.linked ? 'ATIVO' : 'AUSENTE';
 
-  if (s.rx > 0) {
+  // A condicao e a PRESENCA da leitura, nao a taxa de pacotes. Enquanto `rx`
+  // significava "quadros recebidos" as duas coisas coincidiam; desde que passou
+  // a reportar a cadencia CONFIGURADA, um transmissor sem telemetria entrava
+  // aqui com s.rssi ausente e o render inteiro morria num TypeError -- o painel
+  // congelava e o log so dizia "sem resposta do radio".
+  if (Number.isFinite(s.rssi) && Number.isFinite(s.snr) && s.rssi < 0) {
     $('rssi').textContent = s.rssi.toFixed(1);
     $('snr').textContent = s.snr.toFixed(1);
+    if ($('rssiNote')) $('rssiNote').textContent = '';
     setMeter(s.rssi);
     history.push(s.rssi);
     while (history.length > HIST) history.shift();
     drawChart();
+  } else {
+    // Sem leitura o campo volta a traco. Deixar o ultimo numero na tela e o
+    // mesmo erro de sempre: o painel passaria a mostrar um sinal que nao existe.
+    $('rssi').textContent = '–––.–';
+    $('snr').textContent = '––.–';
+    // ...e diz POR QUE, quando o firmware sabe. Traco sozinho responde "nao
+    // sei" a duas perguntas diferentes: nunca houve retorno, ou parou de haver.
+    const nota = $('rssiNote');
+    if (nota) {
+      // tlmIdade so existe no transmissor. No receptor o motivo e mais direto:
+      // ele mede o que recebe, e sem enlace nao recebe nada.
+      if (s.tlmIdade !== undefined) {
+        nota.textContent = s.tlmIdade < 0
+          ? 'sem telemetria — nenhum pacote de volta desde que ligou'
+          : `telemetria parou há ${(s.tlmIdade / 1000).toFixed(1)} s`;
+      } else if (s.linked === false) {
+        nota.textContent = 'sem enlace — nenhum quadro chegando';
+      }
+    }
   }
 
   renderGauges(s);
@@ -480,15 +956,40 @@ function render(s, force = false) {
   $('radioWarn').hidden = !radioDown;
   if (radioDown) $('radioErr').textContent = s.radioErr || 'motivo desconhecido';
 
-  put($('freq'), s.freq.toFixed(3));
-  put($('power'), s.power);
-  put($('sf'), s.sf);
-  put($('cr'), s.cr);
-  put($('bw'), s.bw);
+  // No ExpressLRS o modem e LEITURA, nao ajuste -- e o botao Aplicar nem existe
+  // do outro lado (a rota so aceita banda, taxa, potencia e telemetria).
+  const elrs = String(s.node || '').indexOf('ELRS') === 0;
+  arrumarColunas(elrs);
+  document.body.dataset.fw = elrs ? 'elrs' : 'bancada';
+
+  // No ExpressLRS o modem e LEITURA. Os campos de formulario somem inteiros --
+  // desabilitados eles pareciam formulario quebrado, e um <select> sem a opcao
+  // correspondente (bw/cr desconhecidos viram 0 no firmware) renderizava vazio.
+  if ($('secModem')) $('secModem').hidden = elrs;
+  if ($('specModem')) $('specModem').hidden = !elrs;
+  if (elrs) {
+    const num = (v, casas, uni) =>
+      Number.isFinite(v) && v > 0 ? v.toFixed(casas) + (uni || '') : '·';
+    $('mFreq').textContent = num(s.freq, 3, ' MHz');
+    $('mSf').textContent = s.sf ? 'SF' + s.sf : '·';
+    $('mBw').textContent = num(s.bw, 2, ' kHz');
+    $('mCr').textContent = s.cr ? '4/' + s.cr : '·';
+    $('mToa').textContent = num(s.toa, 1, ' ms');
+  } else {
+    put($('freq'), s.freq.toFixed(3));
+    put($('power'), s.power);
+    put($('sf'), s.sf);
+    put($('cr'), s.cr);
+    put($('bw'), s.bw);
+  }
   put($('beacon'), s.beacon);
   put($('interval'), s.interval);
 
-  $('powerHint').textContent = `faixa permitida ${s.pmin} a ${s.pmax} dBm nesta banda`;
+  // A procedencia dos numeros vive AQUI, nao no rotulo do controle: sao os dBm
+  // que o datasheet do modulo atribui a cada degrau, nao uma medida do radio.
+  $('powerHint').textContent = Array.isArray(s.powers) && s.powers.length
+    ? `${s.powers.length} níveis · ${s.pmin} a ${s.pmax} dBm nesta banda, pelo datasheet do módulo`
+    : `faixa permitida ${s.pmin} a ${s.pmax} dBm nesta banda`;
 
   if (Array.isArray(s.log)) {
     for (const e of s.log) {
@@ -977,6 +1478,8 @@ function showTab(which) {
   $('viewGauges').hidden = !g;
   $('viewDb').hidden = !db;
 
+  setRcFast(g);
+
   if (db) {
     // Pede a credencial ASSIM QUE A ABA ABRE, e não quando alguma consulta
     // falha: descobrir que falta configuração depois de clicar em algo é o
@@ -987,6 +1490,40 @@ function showTab(which) {
   // O Leaflet mede o container na criacao; criado escondido, mede zero e o mapa
   // fica cinza pela metade. Remedir ao mostrar a aba e obrigatorio.
   if (db && DB.map) setTimeout(() => DB.map.invalidateSize(), 60);
+}
+
+/* --- manches em tempo real ------------------------------------------------
+   O /api/state e pesado e vem a 1 Hz -- suficiente para banda, contadores e
+   grafico, e visivelmente lento para um manche que se move a 50 Hz.
+
+   Entao a aba de mostradores busca /api/rc, que traz so os 16 canais e o
+   enlace (~110 bytes), a 20 Hz. Nao substitui o polling normal: ele continua
+   cuidando de todo o resto, e este aqui so mexe nas barras. */
+let rcTimer = null;
+let rcBusy = false;
+
+async function pollRc() {
+  // Sem sobreposicao: numa rede ruim uma resposta atrasada seria alcancada
+  // pela seguinte e as barras andariam para tras.
+  if (rcBusy || LINK.mode !== 'http') return;
+  rcBusy = true;
+  try {
+    const r = await fetch('api/rc', { cache: 'no-store' });
+    if (r.ok) {
+      const d = await r.json();
+      renderSticks({ rc: d.rc.slice(0, 4), rcAll: d.rc, rcMax: 2047,
+                     rcN: 0, rcAge: 0, rcSw: 0 });
+    }
+  } catch (e) {
+    /* uma falha isolada nao merece ruido: o polling normal ja acusa queda */
+  } finally {
+    rcBusy = false;
+  }
+}
+
+function setRcFast(on) {
+  if (on && !rcTimer) rcTimer = setInterval(pollRc, 50);
+  else if (!on && rcTimer) { clearInterval(rcTimer); rcTimer = null; }
 }
 
 $('tabBench').addEventListener('click', () => showTab('bench'));
@@ -1150,31 +1687,89 @@ function buildSticks() {
     const b = document.createElement('span');
     b.className = 'sw';
     b.id = 'sw' + i;
-    b.textContent = 'AUX' + (i + 1);
+
+    const lb = document.createElement('b');
+    lb.textContent = 'AUX' + (i + 1);
+
+    // Trilho com preenchimento proporcional, e nao so aceso/apagado.
+    //
+    // Chave de 3 posicoes e o caso comum num radio de RC, e havia so dois
+    // estados aqui: o meio virava "baixo" ou "alto" conforme o lado do
+    // limiar, e o operador nao tinha como ver a posicao central existir.
+    // Com o trilho, 2, 3 e 6 posicoes aparecem todas — cada uma para numa
+    // altura diferente.
+    const tr = document.createElement('i');
+    tr.className = 'sw__track';
+    const fi = document.createElement('i');
+    fi.className = 'sw__fill';
+    fi.id = 'swf' + i;
+    tr.appendChild(fi);
+
+    const vv = document.createElement('u');
+    vv.className = 'sw__v';
+    vv.id = 'swv' + i;
+    vv.textContent = '—';
+
+    b.append(lb, tr, vv);
     sw.appendChild(b);
   }
   sticksBuilt = true;
 }
 
 function renderSticks(s) {
-  const has = Array.isArray(s.rc) && s.rc.length === 4;
+  // Com enlace ausente o firmware ainda publica rc[] -- sao os valores de
+  // failsafe. Desenha-los e mostrar manches de um piloto que nao existe.
+  const has = Array.isArray(s.rc) && s.rc.length === 4 && s.linked !== false;
   $('sticks').hidden = !has;
   $('rcOff').hidden = has;
   if (!has) return;
 
   buildSticks();
 
+  // A escala vem do DIALETO, nao fixa.
+  //
+  // O firmware de bancada entrega 10 bits crus do ar (0..1023); o CRSF de um
+  // receptor ExpressLRS entrega 11 bits na faixa util 172..1811, com 992 no
+  // centro. Dividir os dois por 1023 fazia a barra do CRSF estourar 100% e o
+  // manche parecer travado no fim de curso.
+  const crsf = s.rcMax === 2047;
+  const LO = crsf ? 172 : 0;
+  const HI = crsf ? 1811 : 1023;
+
   for (let i = 0; i < 4; i++) {
     const raw = s.rc[i];
-    $('ch' + i).style.width = ((raw / 1023) * 100).toFixed(1) + '%';
+    const pct = Math.max(0, Math.min(100, ((raw - LO) / (HI - LO)) * 100));
+    $('ch' + i).style.width = pct.toFixed(1) + '%';
     $('chv' + i).textContent = raw;
   }
 
-  const bits = s.rcSw || 0;
+  // Chaves: no CRSF sao CANAIS (5 em diante), nao bits. Uma chave de 2 posicoes
+  // fica em 191 ou 1792; o meio da faixa separa as duas sem precisar saber
+  // quantas posicoes cada uma tem.
+  // Tres faixas, nao duas. Um terco de cada lado e "baixo"/"alto"; o meio e a
+  // posicao central, que existe de verdade numa chave de 3 e antes era
+  // arredondada para um dos extremos.
+  const NOMES = ['BAIXO', 'MEIO', 'ALTO'];
   for (let i = 0; i < 8; i++) {
-    // AUX1 vem do bit alto separado (ch4); os outros sao os 7 bits do byte.
-    const on = i === 0 ? (bits >> 6) & 1 : (bits >> (i - 1)) & 1;
-    $('sw' + i).dataset.on = on ? '1' : '0';
+    let raw = null;
+    if (crsf && Array.isArray(s.rcAll)) {
+      raw = s.rcAll[4 + i];
+    } else {
+      // Firmware de bancada: as chaves vem como bits, entao so ha 2 posicoes
+      // — o RCDATA em OTA4 nao carrega mais que isso.
+      const bits = s.rcSw || 0;
+      const on = i === 0 ? (bits >> 6) & 1 : (bits >> (i - 1)) & 1;
+      raw = on ? HI : LO;
+    }
+
+    const f = Math.max(0, Math.min(1, (raw - LO) / (HI - LO)));
+    const pos = f < 1 / 3 ? 0 : f < 2 / 3 ? 1 : 2;
+
+    const el = $('sw' + i);
+    el.dataset.pos = String(pos);
+    el.title = NOMES[pos] + ' · ' + raw;
+    $('swf' + i).style.height = (f * 100).toFixed(0) + '%';
+    $('swv' + i).textContent = pos === 0 ? '▁' : pos === 1 ? '▄' : '█';
   }
 
   // A taxa REAL de RCDATA, e nao a taxa do transmissor.
@@ -1182,12 +1777,15 @@ function renderSticks(s) {
   // O ELRS salta 80 canais e a bancada senta so no de sync, entao chega uma
   // fracao dos pacotes. Mostrar isso evita que barras lentas sejam lidas como
   // travamento — elas estao certas, o que e baixo e a colheita.
-  const dt = s.rcAge;
+  // rcAge nao existe no ExpressLRS. Sem guarda, (undefined/1000).toFixed(1)
+  // escrevia "ultimo ha NaN s" alternando com "ao vivo" a cada segundo.
+  const dt = Number.isFinite(s.rcAge) ? s.rcAge : (s.linked ? 0 : Infinity);
   $('rcRate').textContent =
     (dt < 1200 ? 'ao vivo' : 'ultimo ha ' + (dt / 1000).toFixed(1) + ' s');
-  $('rcNote').textContent =
-    s.rcN + ' quadro(s) RCDATA decodificado(s) · so o canal de sync e ouvido, ' +
-    'entao chega ~1 de cada 80';
+  if (!s.rcN) return;   // atualizacao rapida: so as barras, sem remexer texto
+  $('rcNote').textContent = crsf
+    ? 'receptor ExpressLRS seguindo o FHSS · canais a 20 Hz na tela'
+    : s.rcN + ' quadro(s) RCDATA · modo escuta no canal de sync, chega ~1 de cada 80';
 }
 
 /* --- transporte: WiFi, ou serial ------------------------------------------

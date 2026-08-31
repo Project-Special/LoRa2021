@@ -9,6 +9,19 @@
    Sem webfont, sem CDN, sem framework — servido offline pelo próprio ESP32.
    ========================================================================== */
 
+/* hidden global */
+/*
+  O atributo `hidden` so vale se nada declarar `display` depois dele.
+  A folha do navegador traz `[hidden] { display: none }` com especificidade
+  minima, e qualquer regra do projeto -- `.seg { display: grid }` e o caso que
+  doeu -- ganha dela. O resultado e uma secao "escondida" que continua na tela,
+  com controles que nao fazem mais nada.
+  Havia tres remendos pontuais (.warn, .panel--db, .db__stats) para o mesmo
+  problema. Esta regra resolve todos e os que vierem.
+*/
+[hidden] { display: none !important; }
+
+
 :root {
   --mono: ui-monospace, "SFMono-Regular", "SF Mono", "JetBrains Mono",
           "IBM Plex Mono", "Cascadia Mono", Menlo, Consolas, monospace;
@@ -366,7 +379,19 @@ body {
   align-items: stretch;
 }
 .deck .panel { display: flex; flex-direction: column; }
+/*
+  Alinhar a BASE das tres colunas so faz sentido quando elas tem conteudo
+  comparavel. No ExpressLRS nao tem: sobram poucos blocos, e o `margin-top:auto`
+  empurra o ultimo para o rodape, abrindo um vao entre o titulo e o conteudo.
+  Pior, quando o ultimo filho esta `hidden` ninguem recebe o empurrao e aquela
+  coluna se aglomera no topo -- as tres desalinham em vez de alinhar.
+*/
 .deck .panel > :last-child { margin-top: auto; }
+body[data-fw="elrs"] .deck .panel > :last-child { margin-top: 0; }
+
+/* Primeiro subtitulo da coluna nao leva filete: ele duplicaria a regua que o
+   proprio titulo do painel ja desenha logo acima. */
+.panel__sub:first-of-type { border-top: 0; margin-top: 4px; padding-top: 0; }
 .deck .panel > .field:last-child { margin-bottom: 0; }   /* alinha a base dos três */
 
 .panel {
@@ -452,7 +477,6 @@ body {
   border-radius: 2px;
   background: color-mix(in srgb, var(--bad) 9%, transparent);
 }
-.warn[hidden] { display: none; }
 .warn--top { margin: 16px 0 0; font-size: var(--t-body); }
 .warn--top b { color: var(--bad); }
 
@@ -756,7 +780,6 @@ input:focus, select:focus {
 
 /* ═══════════════════════════════════════════════════════════ banco ══════ */
 .panel--db { margin-top: 16px; }
-.panel--db[hidden] { display: none; }
 
 /* Lista estreita à esquerda, trabalho à direita. Abaixo de 900 px empilha:
    uma tabela de 10 colunas ao lado de uma lista não cabe em tela de notebook
@@ -861,7 +884,6 @@ input:focus, select:focus {
   margin: 0;
 }
 
-.db__stats[hidden] { display: none; }
 .db__stats dt { font-size: var(--t-mini); color: var(--ink-far); text-transform: uppercase; letter-spacing: .08em; }
 .db__stats dd { margin: 2px 0 0; font-size: 18px; font-variant-numeric: tabular-nums; color: var(--ink); }
 .db__stats dd.bad { color: var(--bad); }
@@ -920,8 +942,6 @@ input:focus, select:focus {
   max-width: 520px;
 }
 
-.db__auth[hidden] { display: none; }
-.db__who[hidden] { display: none; }
 .db__who { display: flex; align-items: center; gap: 10px; }
 
 /* ═════════════════════════════════════════════════════ mostrador de LQ ══ */
@@ -981,7 +1001,6 @@ input:focus, select:focus {
 
 /* ═════════════════════════════════════════════════════ aba mostradores ══ */
 .panel--gauges { margin-top: 16px; }
-.panel--gauges[hidden] { display: none; }
 .panel--gauges .panel__t span { margin-left: auto; letter-spacing: .14em; }
 
 /* Lado a lado no largo, empilhados no estreito. Um mostrador espremido a
@@ -1025,7 +1044,6 @@ input:focus, select:focus {
 .gdigits__row i { font-style: normal; font-size: var(--t-mini); color: var(--ink-far); }
 
 /* ═════════════════════════════════════════════════ manches e chaves ═════ */
-.sticks[hidden] { display: none; }
 .sticks { margin-bottom: 22px; }
 
 .sticks__hd {
@@ -1092,10 +1110,16 @@ input:focus, select:focus {
 
 .switches { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 
+/* Chave com POSICAO, nao com liga/desliga.
+   Tres faixas de cor para baixo/meio/alto, mais um trilho vertical com
+   preenchimento proporcional — assim uma chave de 6 posicoes tambem se
+   distingue, parando em alturas diferentes dentro da mesma faixa. */
 .sw {
-  min-width: 46px;
-  text-align: center;
-  padding: 6px 8px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 84px;
+  padding: 6px 9px;
   border: 1px solid var(--rule);
   border-radius: 6px;
   font-size: var(--t-mini);
@@ -1104,10 +1128,48 @@ input:focus, select:focus {
   background: #0000004d;
 }
 
-.sw[data-on="1"] {
+.sw b { font-weight: 500; }
+
+.sw__track {
+  position: relative;
+  width: 7px;
+  height: 26px;
+  border-radius: 2px;
+  background: #0c110f;
+  box-shadow: inset 0 1px 3px #000, inset 0 0 0 1px #ffffff0a;
+  overflow: hidden;
+}
+
+/* Cresce de baixo para cima: e assim que uma chave de manche se move, e uma
+   barra que enche de cima para baixo leria ao contrario. */
+.sw__fill {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 0;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+  transition: height .09s linear;
+}
+
+/* Marca do meio: sem ela nao da para ver que a chave esta na posicao central,
+   que e justamente a que o modo de duas posicoes escondia. */
+.sw__track::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0;
+  top: 50%;
+  height: 1px;
+  background: #ffffff2e;
+}
+
+.sw__v { font-style: normal; font-size: 11px; opacity: .8; min-width: 9px; }
+
+.sw[data-pos="0"] { color: var(--ink-far); }
+.sw[data-pos="1"] { color: #ffab3d; border-color: #ffab3d66; }
+.sw[data-pos="2"] {
   color: var(--glow);
   border-color: var(--glow);
-  box-shadow: 0 0 12px var(--glow-2), inset 0 0 12px var(--glow-2);
+  box-shadow: 0 0 12px var(--glow-2);
 }
 
 /* Placa de transporte: WiFi (HTTP) ou USB (Web Serial). */
