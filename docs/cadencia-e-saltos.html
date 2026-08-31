@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Cadencia, tempo no ar, salto de frequencia, convivencia de enlaces e enquadramento Anatel do LoRa2021 em 2,4 GHz e 433 MHz.">
+<style>
+  /* Reset minimo -- o hospedeiro do artifact aplica um; um arquivo aberto
+     direto do disco, nao. */
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; }
+  table { border-spacing: 0; }
+  svg { display: block; }
+</style>
+<title>Cadência e Saltos</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+  /* Paleta clara — o estado base. Neutros com viés ciano, do lado
+     instrumento da coisa; nada de cinza puro. */
+  :root {
+    --ground:   #EFF3F3;
+    --surface:  #FFFFFF;
+    --sunk:     #E4EAEA;
+    --ink:      #0F1E22;
+    --ink-2:    #4A6067;
+    --ink-3:    #7B9198;
+    --rule:     #D2DCDD;
+    --rule-2:   #B9C8CA;
+    --up:       #0E6B7B;   /* subida  · 2,4 GHz */
+    --down:     #A0522A;   /* descida · 433 MHz */
+    --up-soft:  #D6EAED;
+    --down-soft:#F2E1D6;
+    --flag:     #8A3A1E;
+    --flag-bg:  #FAECE4;
+    --shadow:   0 1px 2px rgba(15, 30, 34, .05), 0 8px 24px -16px rgba(15, 30, 34, .28);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:   #0A1315;
+      --surface:  #101D20;
+      --sunk:     #16262A;
+      --ink:      #E7EFEF;
+      --ink-2:    #9DB4B8;
+      --ink-3:    #6C868C;
+      --rule:     #21383C;
+      --rule-2:   #2E4A4F;
+      --up:       #4FC2D3;
+      --down:     #E29060;
+      --up-soft:  #12333A;
+      --down-soft:#33231A;
+      --flag:     #F0A87C;
+      --flag-bg:  #2A1A12;
+      --shadow:   0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -16px rgba(0, 0, 0, .8);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:   #0A1315;
+    --surface:  #101D20;
+    --sunk:     #16262A;
+    --ink:      #E7EFEF;
+    --ink-2:    #9DB4B8;
+    --ink-3:    #6C868C;
+    --rule:     #21383C;
+    --rule-2:   #2E4A4F;
+    --up:       #4FC2D3;
+    --down:     #E29060;
+    --up-soft:  #12333A;
+    --down-soft:#33231A;
+    --flag:     #F0A87C;
+    --flag-bg:  #2A1A12;
+    --shadow:   0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -16px rgba(0, 0, 0, .8);
+  }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font: 400 17px/1.65 "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 940px;
+    margin: 0 auto;
+    padding: clamp(28px, 6vw, 72px) clamp(20px, 5vw, 40px) 96px;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  /* ─── cabeçalho ─────────────────────────────────────────────── */
+
+  .head { display: flex; flex-direction: column; gap: 14px; }
+
+  .eyebrow {
+    font: 500 12px/1 "IBM Plex Mono", ui-monospace, monospace;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  h1 {
+    font: 600 clamp(38px, 7vw, 60px)/1.04 "Zilla Slab", Georgia, serif;
+    letter-spacing: -.015em;
+    text-wrap: balance;
+    margin: 0;
+  }
+
+  .standfirst {
+    max-width: 60ch;
+    color: var(--ink-2);
+    font-size: 19px;
+    margin: 0;
+  }
+
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 22px;
+    margin-top: 8px;
+    padding-top: 18px;
+    border-top: 1px solid var(--rule);
+    font: 400 13px/1.5 "IBM Plex Mono", ui-monospace, monospace;
+    color: var(--ink-3);
+  }
+  .meta b { color: var(--ink-2); font-weight: 500; }
+
+  /* ─── seções ────────────────────────────────────────────────── */
+
+  section { margin-top: clamp(56px, 9vw, 88px); }
+
+  .topic {
+    font: 500 12px/1 "IBM Plex Mono", ui-monospace, monospace;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--up);
+    margin-bottom: 12px;
+  }
+  .topic.alt { color: var(--down); }
+
+  h2 {
+    font: 500 clamp(26px, 4.2vw, 34px)/1.2 "Zilla Slab", Georgia, serif;
+    letter-spacing: -.01em;
+    text-wrap: balance;
+    margin: 0 0 26px;
+    max-width: 22ch;
+  }
+
+  h3 {
+    font: 600 14px/1.3 "IBM Plex Sans", sans-serif;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+    margin: 0 0 14px;
+  }
+
+  p { max-width: 65ch; margin: 0 0 18px; }
+  p:last-child { margin-bottom: 0; }
+
+  /* A resposta curta, antes de qualquer detalhe. */
+  .answer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 16px;
+    padding: 22px 26px;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--up);
+    border-radius: 3px;
+    box-shadow: var(--shadow);
+    margin-bottom: 30px;
+  }
+  .answer.alt { border-left-color: var(--down); }
+  .answer .big {
+    font: 500 clamp(30px, 5vw, 40px)/1 "IBM Plex Mono", ui-monospace, monospace;
+    letter-spacing: -.02em;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+  }
+  .answer .said { color: var(--ink-2); font-size: 16px; max-width: 46ch; }
+
+  /* ─── diagramas ─────────────────────────────────────────────── */
+
+  figure {
+    margin: 30px 0;
+    padding: 26px;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    box-shadow: var(--shadow);
+    overflow-x: auto;
+  }
+  figure svg { display: block; width: 100%; height: auto; min-width: 520px; }
+  figcaption {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--rule);
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--ink-2);
+    max-width: 68ch;
+  }
+
+  .key { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-bottom: 18px; }
+  .key span {
+    display: inline-flex; align-items: center; gap: 7px;
+    font: 400 13px/1 "IBM Plex Mono", ui-monospace, monospace;
+    color: var(--ink-2);
+  }
+  .key i { width: 14px; height: 10px; border-radius: 1px; display: inline-block; }
+
+  /* ─── tabelas ───────────────────────────────────────────────── */
+
+  .scroll { overflow-x: auto; margin: 26px 0; }
+  table {
+    width: 100%;
+    min-width: 520px;
+    border-collapse: collapse;
+    font-size: 15px;
+  }
+  caption {
+    text-align: left;
+    font: 500 12px/1 "IBM Plex Mono", ui-monospace, monospace;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    padding-bottom: 12px;
+  }
+  th, td { padding: 11px 14px; text-align: left; border-bottom: 1px solid var(--rule); }
+  thead th {
+    font: 500 12px/1.3 "IBM Plex Sans", sans-serif;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    border-bottom: 1px solid var(--rule-2);
+    white-space: nowrap;
+  }
+  td.n, th.n { text-align: right; font-family: "IBM Plex Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+  tbody tr:last-child td { border-bottom: none; }
+  tr.here td { background: var(--up-soft); }
+  tr.here td:first-child { box-shadow: inset 3px 0 0 var(--up); }
+  .band {
+    display: inline-block; padding: 2px 8px; border-radius: 999px;
+    font: 500 11px/1.6 "IBM Plex Mono", ui-monospace, monospace;
+    letter-spacing: .04em;
+  }
+  .band.g24 { background: var(--up-soft); color: var(--up); }
+  .band.g433 { background: var(--down-soft); color: var(--down); }
+
+  /* ─── medição bruta ─────────────────────────────────────────── */
+
+  .measured {
+    background: var(--sunk);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 18px 22px;
+    margin: 26px 0;
+    font: 400 14px/1.75 "IBM Plex Mono", ui-monospace, monospace;
+    color: var(--ink-2);
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .measured b { color: var(--ink); font-weight: 500; }
+
+  /* ─── nota de atenção ───────────────────────────────────────── */
+
+  .flag {
+    background: var(--flag-bg);
+    border: 1px solid var(--down);
+    border-radius: 3px;
+    padding: 22px 26px;
+    margin: 30px 0;
+  }
+  .flag h3 { color: var(--flag); margin-bottom: 10px; }
+  .flag p { color: var(--ink-2); }
+  .flag strong { color: var(--ink); font-weight: 600; }
+
+  .fine {
+    margin-top: clamp(56px, 9vw, 80px);
+    padding-top: 20px;
+    border-top: 1px solid var(--rule);
+    font-size: 14px;
+    color: var(--ink-3);
+    max-width: 68ch;
+  }
+  .fine code {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 13px;
+    color: var(--ink-2);
+  }
+
+  em { font-style: normal; color: var(--ink); font-weight: 600; }
+
+  a {
+    color: var(--up);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-thickness: 1px;
+    text-decoration-color: var(--rule-2);
+  }
+  a:hover { text-decoration-color: var(--up); }
+  a:focus-visible {
+    outline: 2px solid var(--up);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .answer, figure { transition: border-color .2s ease; }
+  }
+</style>
+</head>
+<body><div class="wrap">
+
+  <header class="head">
+    <div class="eyebrow">LoRa2021 · Bancada de alcance</div>
+    <h1>Cadência e saltos</h1>
+    <p class="standfirst">
+      Quatro perguntas sobre como o enlace usa o ar: quantos pacotes passam por
+      segundo e quanto dura cada um; se a faixa de 433 MHz salta de frequência
+      como a de 2,4 GHz; e quantos equipamentos cabem lado a lado antes de um
+      atrapalhar o outro; e o que a Anatel permite em cada faixa.
+    </p>
+    <div class="meta">
+      <span><b>Enlace</b> ExpressLRS 3.6.4 · Semtech LR2021</span>
+      <span><b>Modo medido</b> 2,4 GHz · 50 Hz</span>
+      <span><b>28 ago 2026</b></span>
+    </div>
+  </header>
+
+  <!-- ══════════════════════════════════════ pergunta 1 ══════ -->
+  <section>
+    <div class="topic">Cadência</div>
+    <h2>Quantos pacotes por segundo vão de um lado ao outro?</h2>
+
+    <div class="answer">
+      <div class="big">46,7</div>
+      <div class="said">
+        pacotes por segundo do transmissor ao receptor — medidos, não estimados.
+        No sentido de volta, 3,1 por segundo.
+      </div>
+    </div>
+
+    <p>
+      O rádio abre <em>50 janelas por segundo</em>, uma a cada 20 ms. Elas não são
+      todas iguais: uma em cada dezesseis é cedida à telemetria, que anda no
+      sentido contrário, e uma a cada cinco segundos leva o pacote de SYNC que
+      mantém as duas pontas no mesmo compasso.
+    </p>
+
+    <figure>
+      <div class="key">
+        <span><i style="background: var(--up)"></i>subida · comandos</span>
+        <span><i style="background: var(--down)"></i>descida · telemetria</span>
+        <span><i style="background: var(--sunk); border: 1px solid var(--rule-2)"></i>silêncio</span>
+      </div>
+      <svg viewBox="0 0 700 168" role="img" aria-label="Dezesseis janelas de 20 ms: quinze de subida e uma de telemetria; dentro de cada janela, 10,8 ms de portadora e 9,2 ms de silêncio.">
+        <!-- ciclo de 16 janelas -->
+        <text x="0" y="12" fill="currentColor" opacity=".55" font-family="IBM Plex Mono, monospace" font-size="11">um ciclo de telemetria · 16 janelas · 320 ms</text>
+        <g>
+          <!-- 15 janelas de subida + 1 de telemetria; janela = 42px, ocupado = 22,7px -->
+          <rect x="0" y="26" width="672" height="30" fill="var(--sunk)" stroke="var(--rule-2)" stroke-width="1"></rect>
+          <g fill="var(--up)">
+            <rect x="1" y="27" width="22" height="28"></rect>
+            <rect x="43" y="27" width="22" height="28"></rect>
+            <rect x="85" y="27" width="22" height="28"></rect>
+            <rect x="127" y="27" width="22" height="28"></rect>
+            <rect x="169" y="27" width="22" height="28"></rect>
+            <rect x="211" y="27" width="22" height="28"></rect>
+            <rect x="253" y="27" width="22" height="28"></rect>
+            <rect x="295" y="27" width="22" height="28"></rect>
+            <rect x="337" y="27" width="22" height="28"></rect>
+            <rect x="379" y="27" width="22" height="28"></rect>
+            <rect x="421" y="27" width="22" height="28"></rect>
+            <rect x="463" y="27" width="22" height="28"></rect>
+            <rect x="505" y="27" width="22" height="28"></rect>
+            <rect x="547" y="27" width="22" height="28"></rect>
+            <rect x="589" y="27" width="22" height="28"></rect>
+          </g>
+          <rect x="631" y="27" width="22" height="28" fill="var(--down)"></rect>
+          <text x="642" y="72" fill="var(--down)" font-family="IBM Plex Mono, monospace" font-size="11" text-anchor="middle">1:16</text>
+        </g>
+
+        <!-- ampliação de uma janela -->
+        <line x1="0" y1="96" x2="672" y2="96" stroke="var(--rule)" stroke-width="1"></line>
+        <text x="0" y="116" fill="currentColor" opacity=".55" font-family="IBM Plex Mono, monospace" font-size="11">uma janela ampliada · 20 ms</text>
+        <rect x="0" y="126" width="672" height="30" fill="var(--sunk)" stroke="var(--rule-2)" stroke-width="1"></rect>
+        <rect x="1" y="127" width="361" height="28" fill="var(--up)"></rect>
+        <text x="182" y="146" fill="var(--surface)" font-family="IBM Plex Mono, monospace" font-size="12" text-anchor="middle">10,8 ms de portadora</text>
+        <text x="517" y="146" fill="currentColor" opacity=".7" font-family="IBM Plex Mono, monospace" font-size="12" text-anchor="middle">9,2 ms de silêncio</text>
+      </svg>
+      <figcaption>
+        Cada janela dura 20 ms e a portadora ocupa 10,8 ms dela — <em>54 % do
+        tempo com sinal no ar</em>. Os 9,2 ms restantes é onde cabe a comutação do
+        rádio, a resposta de telemetria e o salto de canal.
+      </figcaption>
+    </figure>
+
+    <h3>De onde saem os 46,7</h3>
+    <div class="scroll">
+      <table>
+        <caption>Repartição das 50 janelas por segundo</caption>
+        <thead>
+          <tr><th>Sentido</th><th>O que leva</th><th class="n">Pacotes/s</th><th class="n">Fração</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Transmissor → receptor</td><td>Comandos de canal</td><td class="n">46,7</td><td class="n">93,4 %</td></tr>
+          <tr><td>Receptor → transmissor</td><td>Telemetria (razão 1:16)</td><td class="n">3,1</td><td class="n">6,2 %</td></tr>
+          <tr><td>Transmissor → receptor</td><td>SYNC, 1 a cada 5 s</td><td class="n">0,2</td><td class="n">0,4 %</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      A previsão era 50 − 3,125 − 0,2 = 46,7. A saída CRSF do receptor, contada
+      ao longo de 24 segundos, deu no mesmo primeiro decimal:
+    </p>
+
+    <div class="measured">janela: 24.23 s
+  quadro 0x16 (canais RC) : 1131  ->  <b>46.7 por segundo</b>
+  quadro 0x14 (estatíst.) :  240  ->  9.9 por segundo</div>
+
+    <p>
+      Os <code style="font-family:'IBM Plex Mono',monospace">0x14</code> a 9,9 por
+      segundo não vão ao ar: são as estatísticas de enlace que o receptor entrega
+      ao controlador de voo a cada 100 ms, cadência local.
+    </p>
+
+    <h3>Quanto dura um pacote</h3>
+    <p>
+      <em>10,8 ms</em> nesta taxa — o valor que o próprio firmware carrega para
+      SF8, largura de 812,5 kHz, código 4/8 e oito bytes de carga. Pacote mais
+      longo espalha a mesma energia em mais tempo, e é assim que o receptor
+      arranca sinal de dentro do ruído.
+    </p>
+
+    <div class="scroll">
+      <table>
+        <caption>Todas as taxas · tempo no ar e sensibilidade</caption>
+        <thead>
+          <tr>
+            <th>Banda</th><th>Taxa</th>
+            <th class="n">Janelas/s</th><th class="n">Pacote</th>
+            <th class="n">Ar ocupado</th><th class="n">Sensibilidade</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><span class="band g24">2,4 GHz</span></td><td>500 Hz</td><td class="n">500</td><td class="n">1,5 ms</td><td class="n">75 %</td><td class="n">−105 dBm</td></tr>
+          <tr><td><span class="band g24">2,4 GHz</span></td><td>250 Hz</td><td class="n">250</td><td class="n">3,3 ms</td><td class="n">82 %</td><td class="n">−108 dBm</td></tr>
+          <tr><td><span class="band g24">2,4 GHz</span></td><td>150 Hz</td><td class="n">150</td><td class="n">5,9 ms</td><td class="n">88 %</td><td class="n">−112 dBm</td></tr>
+          <tr class="here"><td><span class="band g24">2,4 GHz</span></td><td>50 Hz &nbsp;— em uso</td><td class="n">50</td><td class="n">10,8 ms</td><td class="n">54 %</td><td class="n">−115 dBm</td></tr>
+          <tr><td><span class="band g433">433 MHz</span></td><td>250 Hz</td><td class="n">250</td><td class="n">3,2 ms</td><td class="n">80 %</td><td class="n">−111 dBm</td></tr>
+          <tr><td><span class="band g433">433 MHz</span></td><td>200 Hz</td><td class="n">200</td><td class="n">4,4 ms</td><td class="n">88 %</td><td class="n">−112 dBm</td></tr>
+          <tr><td><span class="band g433">433 MHz</span></td><td>100 Hz</td><td class="n">100</td><td class="n">8,8 ms</td><td class="n">88 %</td><td class="n">−117 dBm</td></tr>
+          <tr><td><span class="band g433">433 MHz</span></td><td>50 Hz</td><td class="n">50</td><td class="n">18,6 ms</td><td class="n">93 %</td><td class="n">−120 dBm</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      Para campanha de alcance interessa a taxa mais lenta. Entre 500 Hz e 50 Hz
+      em 2,4 GHz há <em>dez decibéis</em> de sensibilidade — mais do que qualquer
+      ajuste de potência disponível nesta placa consegue devolver.
+    </p>
+  </section>
+
+  <!-- ══════════════════════════════════════ pergunta 2 ══════ -->
+  <section>
+    <div class="topic alt">Salto de frequência</div>
+    <h2>Em 433 MHz há saltos como em 2,4 GHz?</h2>
+
+    <div class="answer alt">
+      <div class="big">3&nbsp;<span style="color: var(--ink-3); font-size: .6em">contra</span>&nbsp;80</div>
+      <div class="said">
+        Sim — mesmo mecanismo, mesmo código, mesma sequência semeada pelo UID.
+        O que muda é quantos canais existem para saltar.
+      </div>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 700 232" role="img" aria-label="Comparação das grades de canais: 80 canais espalhados por 79 MHz em 2,4 GHz, contra 3 canais em 1,35 MHz no EU433.">
+        <!-- 2,4 GHz -->
+        <text x="0" y="12" fill="var(--up)" font-family="IBM Plex Mono, monospace" font-size="11" letter-spacing="1.4">2,4 GHZ ISM · 80 CANAIS · 1 MHZ ENTRE ELES</text>
+        <line x1="0" y1="44" x2="672" y2="44" stroke="var(--rule-2)" stroke-width="1"></line>
+        <g stroke="var(--up)" stroke-width="2">
+          <line x1="0" y1="30" x2="0" y2="44"></line><line x1="8.5" y1="30" x2="8.5" y2="44"></line><line x1="17" y1="30" x2="17" y2="44"></line><line x1="25.5" y1="30" x2="25.5" y2="44"></line><line x1="34" y1="30" x2="34" y2="44"></line><line x1="42.5" y1="30" x2="42.5" y2="44"></line><line x1="51" y1="30" x2="51" y2="44"></line><line x1="59.5" y1="30" x2="59.5" y2="44"></line><line x1="68" y1="30" x2="68" y2="44"></line><line x1="76.5" y1="30" x2="76.5" y2="44"></line>
+          <line x1="85" y1="30" x2="85" y2="44"></line><line x1="93.5" y1="30" x2="93.5" y2="44"></line><line x1="102" y1="30" x2="102" y2="44"></line><line x1="110.5" y1="30" x2="110.5" y2="44"></line><line x1="119" y1="30" x2="119" y2="44"></line><line x1="127.5" y1="30" x2="127.5" y2="44"></line><line x1="136" y1="30" x2="136" y2="44"></line><line x1="144.5" y1="30" x2="144.5" y2="44"></line><line x1="153" y1="30" x2="153" y2="44"></line><line x1="161.5" y1="30" x2="161.5" y2="44"></line>
+          <line x1="170" y1="30" x2="170" y2="44"></line><line x1="178.5" y1="30" x2="178.5" y2="44"></line><line x1="187" y1="30" x2="187" y2="44"></line><line x1="195.5" y1="30" x2="195.5" y2="44"></line><line x1="204" y1="30" x2="204" y2="44"></line><line x1="212.5" y1="30" x2="212.5" y2="44"></line><line x1="221" y1="30" x2="221" y2="44"></line><line x1="229.5" y1="30" x2="229.5" y2="44"></line><line x1="238" y1="30" x2="238" y2="44"></line><line x1="246.5" y1="30" x2="246.5" y2="44"></line>
+          <line x1="255" y1="30" x2="255" y2="44"></line><line x1="263.5" y1="30" x2="263.5" y2="44"></line><line x1="272" y1="30" x2="272" y2="44"></line><line x1="280.5" y1="30" x2="280.5" y2="44"></line><line x1="289" y1="30" x2="289" y2="44"></line><line x1="297.5" y1="30" x2="297.5" y2="44"></line><line x1="306" y1="30" x2="306" y2="44"></line><line x1="314.5" y1="30" x2="314.5" y2="44"></line><line x1="323" y1="30" x2="323" y2="44"></line><line x1="331.5" y1="30" x2="331.5" y2="44"></line>
+          <line x1="348.5" y1="30" x2="348.5" y2="44"></line><line x1="357" y1="30" x2="357" y2="44"></line><line x1="365.5" y1="30" x2="365.5" y2="44"></line><line x1="374" y1="30" x2="374" y2="44"></line><line x1="382.5" y1="30" x2="382.5" y2="44"></line><line x1="391" y1="30" x2="391" y2="44"></line><line x1="399.5" y1="30" x2="399.5" y2="44"></line><line x1="408" y1="30" x2="408" y2="44"></line><line x1="416.5" y1="30" x2="416.5" y2="44"></line><line x1="425" y1="30" x2="425" y2="44"></line>
+          <line x1="433.5" y1="30" x2="433.5" y2="44"></line><line x1="442" y1="30" x2="442" y2="44"></line><line x1="450.5" y1="30" x2="450.5" y2="44"></line><line x1="459" y1="30" x2="459" y2="44"></line><line x1="467.5" y1="30" x2="467.5" y2="44"></line><line x1="476" y1="30" x2="476" y2="44"></line><line x1="484.5" y1="30" x2="484.5" y2="44"></line><line x1="493" y1="30" x2="493" y2="44"></line><line x1="501.5" y1="30" x2="501.5" y2="44"></line><line x1="510" y1="30" x2="510" y2="44"></line>
+          <line x1="518.5" y1="30" x2="518.5" y2="44"></line><line x1="527" y1="30" x2="527" y2="44"></line><line x1="535.5" y1="30" x2="535.5" y2="44"></line><line x1="544" y1="30" x2="544" y2="44"></line><line x1="552.5" y1="30" x2="552.5" y2="44"></line><line x1="561" y1="30" x2="561" y2="44"></line><line x1="569.5" y1="30" x2="569.5" y2="44"></line><line x1="578" y1="30" x2="578" y2="44"></line><line x1="586.5" y1="30" x2="586.5" y2="44"></line><line x1="595" y1="30" x2="595" y2="44"></line>
+          <line x1="603.5" y1="30" x2="603.5" y2="44"></line><line x1="612" y1="30" x2="612" y2="44"></line><line x1="620.5" y1="30" x2="620.5" y2="44"></line><line x1="629" y1="30" x2="629" y2="44"></line><line x1="637.5" y1="30" x2="637.5" y2="44"></line><line x1="646" y1="30" x2="646" y2="44"></line><line x1="654.5" y1="30" x2="654.5" y2="44"></line><line x1="663" y1="30" x2="663" y2="44"></line><line x1="671.5" y1="30" x2="671.5" y2="44"></line>
+        </g>
+        <!-- canal de sync -->
+        <line x1="340" y1="22" x2="340" y2="44" stroke="var(--ink)" stroke-width="2.5"></line>
+        <text x="340" y="16" fill="var(--ink)" font-family="IBM Plex Mono, monospace" font-size="10" text-anchor="middle">SYNC 2441,4</text>
+        <text x="0" y="60" fill="currentColor" opacity=".55" font-family="IBM Plex Mono, monospace" font-size="11">2400,4</text>
+        <text x="672" y="60" fill="currentColor" opacity=".55" font-family="IBM Plex Mono, monospace" font-size="11" text-anchor="end">2479,4 MHz</text>
+
+        <!-- EU433, mesma largura de desenho -->
+        <text x="0" y="106" fill="var(--down)" font-family="IBM Plex Mono, monospace" font-size="11" letter-spacing="1.4">EU433 · 3 CANAIS · 675 KHZ ENTRE ELES</text>
+        <line x1="0" y1="138" x2="672" y2="138" stroke="var(--rule-2)" stroke-width="1"></line>
+        <g stroke="var(--down)" stroke-width="2.5">
+          <line x1="1" y1="124" x2="1" y2="138"></line>
+          <line x1="336" y1="124" x2="336" y2="138"></line>
+        </g>
+        <line x1="671" y1="116" x2="671" y2="138" stroke="var(--ink)" stroke-width="2.5"></line>
+        <text x="640" y="110" fill="var(--ink)" font-family="IBM Plex Mono, monospace" font-size="10" text-anchor="middle">SYNC 434,45</text>
+        <text x="0" y="154" fill="currentColor" opacity=".55" font-family="IBM Plex Mono, monospace" font-size="11">433,1</text>
+        <text x="672" y="154" fill="currentColor" opacity=".55" font-family="IBM Plex Mono, monospace" font-size="11" text-anchor="end">434,45 MHz</text>
+
+        <!-- as duas na MESMA escala -->
+        <line x1="0" y1="184" x2="672" y2="184" stroke="var(--rule)" stroke-width="1"></line>
+        <text x="0" y="204" fill="currentColor" opacity=".55" font-family="IBM Plex Mono, monospace" font-size="11">as duas faixas na mesma escala</text>
+        <rect x="0" y="212" width="672" height="12" fill="var(--up-soft)" stroke="var(--up)" stroke-width="1"></rect>
+        <rect x="0" y="212" width="11.5" height="12" fill="var(--down)"></rect>
+        <text x="24" y="222" fill="currentColor" opacity=".7" font-family="IBM Plex Mono, monospace" font-size="11">1,35 MHz do EU433 dentro dos 79 MHz de 2,4 GHz</text>
+      </svg>
+      <figcaption>
+        A grade de 433 MHz não é uma versão reduzida da outra: é <em>1,7 % da
+        largura</em>, com 3 canais no lugar de 80. O canal de SYNC do EU433 cai na
+        borda superior da faixa, em 434,45 MHz.
+      </figcaption>
+    </figure>
+
+    <div class="scroll">
+      <table>
+        <caption>O mesmo mecanismo, dois mundos</caption>
+        <thead>
+          <tr><th>&nbsp;</th><th>2,4 GHz ISM</th><th>EU433</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Faixa</td><td class="n">2400,4 – 2479,4 MHz</td><td class="n">433,10 – 434,45 MHz</td></tr>
+          <tr><td>Canais</td><td class="n">80</td><td class="n">3</td></tr>
+          <tr><td>Espaçamento</td><td class="n">1,000 MHz</td><td class="n">675 kHz</td></tr>
+          <tr><td>Canal de SYNC</td><td class="n">2441,4 MHz</td><td class="n">434,45 MHz</td></tr>
+          <tr><td>Salta a cada</td><td class="n">2 pacotes</td><td class="n">4 pacotes</td></tr>
+          <tr><td>Saltos por segundo (50 Hz)</td><td class="n">25</td><td class="n">12,5</td></tr>
+          <tr><td>Perda com um interferente</td><td class="n">1,3 %</td><td class="n">33 %</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      O intervalo de salto vem da tabela de taxas e é anunciado dentro do pacote
+      de SYNC — por isso as duas pontas saltam juntas sem combinar nada além do
+      UID gerado pela frase de <em>binding</em>.
+    </p>
+
+    <p>
+      Em 2,4 GHz, um interferente de banda estreita atinge 1 dos 80 canais: perdem-se
+      ~1,3 % dos pacotes e o indicador de qualidade mal se move. Em EU433, atingir
+      1 dos 3 custa <em>um terço dos pacotes</em>. Ali o salto de frequência deixa
+      de ser proteção contra interferência e vira quase só descorrelação de
+      desvanecimento.
+    </p>
+
+    <h3>Se três canais forem poucos</h3>
+    <div class="scroll">
+      <table>
+        <caption>Planos de 433 MHz que este módulo aceita</caption>
+        <thead>
+          <tr><th>Plano</th><th class="n">Faixa</th><th class="n">Canais</th><th class="n">Perda com 1 interferente</th><th>Observação</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>AU433</td><td class="n">433,42 – 434,42</td><td class="n">3</td><td class="n">33 %</td><td>Dentro da ISM</td></tr>
+          <tr class="here"><td>EU433 — em uso</td><td class="n">433,10 – 434,45</td><td class="n">3</td><td class="n">33 %</td><td>Dentro da ISM</td></tr>
+          <tr><td>US433</td><td class="n">433,25 – 438,00</td><td class="n">8</td><td class="n">12,5 %</td><td>Extrapola a ISM da região 1</td></tr>
+          <tr><td>US433W</td><td class="n">423,50 – 438,00</td><td class="n">20</td><td class="n">5 %</td><td>Boa parte fora de alocação ISM</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="flag">
+      <h3>Ciclo de trabalho — antes de sair a campo</h3>
+      <p>
+        Na faixa de 433 MHz da região 1 vale um limite típico de <strong>10 % de
+        ciclo de trabalho</strong>. O enlace a 50 Hz ocupa <strong>93 % do ar</strong> —
+        uma ordem de grandeza acima.
+      </p>
+      <p>
+        Em bancada fechada isso é irrelevante. Numa campanha de meia hora, não é:
+        a faixa é compartilhada com telemetria industrial, controle remoto e
+        radioamador. Subir a taxa para 250 Hz em 433 baixa a ocupação para 80 % e
+        custa 9 dB de sensibilidade — decisão de projeto, não detalhe.
+      </p>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════ pergunta 3 ══════ -->
+  <section>
+    <div class="topic">Convivência</div>
+    <h2>Quantos equipamentos operam lado a lado sem quedas?</h2>
+
+    <div class="answer">
+      <div class="big">12+&nbsp;<span style="color: var(--ink-3); font-size: .6em">em 2,4 GHz</span>&nbsp;·&nbsp;1&nbsp;<span style="color: var(--ink-3); font-size: .6em">em 433</span></div>
+      <div class="said">
+        Para <em>operar</em>. Para <em>medir alcance</em> a conta é outra e bem
+        mais apertada — as duas estão abaixo, porque são perguntas diferentes.
+      </div>
+    </div>
+
+    <p>
+      A fórmula é dos próprios mantenedores do ExpressLRS, e vale para qualquer
+      plano de banda trocando o número de canais:
+    </p>
+
+    <div class="measured">perda ≈ 2 × (pares − 1) / canais
+
+<b>2,4 GHz · 80 canais</b>
+   2 pares →  2,5 %   ·  LQ 97
+   8 pares → 17,5 %   ·  LQ 82
+  12 pares → 27,5 %   ·  LQ 72
+
+<b>EU433 · 3 canais</b>
+   2 pares → 67 %     ·  LQ 33</div>
+
+    <p>
+      O fator 2 é a janela de vulnerabilidade: um pacote se perde tanto se o
+      vizinho começar a transmitir durante ele quanto se já estiver transmitindo
+      quando ele começa.
+    </p>
+
+    <h3>Por que LQ 72 ainda voa</h3>
+    <p>
+      Porque perda de pacote não é queda de enlace. O receptor só declara perda
+      de conexão depois de <em>4 segundos inteiros sem nenhum pacote válido</em> —
+      é o <code>DisconnectTimeoutMs</code> desta taxa, e a 50 pacotes por segundo
+      significa <em>200 perdas seguidas</em>. Com 27 % de perda aleatória, a
+      chance de 200 seguidas é um número com mais de cem zeros depois da vírgula.
+    </p>
+    <p>
+      É por isso que um campo de voo comporta uma dúzia de pilotos com o mesmo
+      equipamento: a perda cresce devagar e o comando continua chegando. Os
+      mantenedores registram exatamente isso — perda mensurável a partir do
+      segundo transmissor, <em>failsafe só passando de uma dúzia</em>.
+    </p>
+
+    <div class="scroll">
+      <table>
+        <caption>Pares simultâneos · dois critérios diferentes</caption>
+        <thead>
+          <tr>
+            <th>Plano</th><th class="n">Canais</th>
+            <th class="n">Por vizinho</th>
+            <th class="n">Operar<br><span style="font-weight:400;text-transform:none;letter-spacing:0">controle confiável</span></th>
+            <th class="n">Medir alcance<br><span style="font-weight:400;text-transform:none;letter-spacing:0">perda alheia &lt; 5 %</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="here"><td><span class="band g24">2,4 GHz ISM</span></td><td class="n">80</td><td class="n">2,5 %</td><td class="n">12+</td><td class="n">3</td></tr>
+          <tr><td><span class="band g433">US433W</span></td><td class="n">20</td><td class="n">10 %</td><td class="n">4</td><td class="n">1</td></tr>
+          <tr><td><span class="band g433">US433</span></td><td class="n">8</td><td class="n">25 %</td><td class="n">2</td><td class="n">1</td></tr>
+          <tr><td><span class="band g433">EU433 / AU433</span></td><td class="n">3</td><td class="n">33 %*</td><td class="n">1</td><td class="n">1</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size: 14px; color: var(--ink-3);">
+      * Com 3 canais a fórmula satura: 2/3 seria 67 %, mas a perda não passa da
+      fração de tempo em que os dois coincidem. Em qualquer leitura, o primeiro
+      vizinho leva por volta de um terço dos pacotes.
+    </p>
+
+    <h3>Para esta bancada, o número que vale é o da direita</h3>
+    <p>
+      Aqui a qualidade do enlace <em>é o experimento</em>. Um vizinho que
+      derrube 2,5 % dos pacotes some dentro do que se está tentando medir: a
+      queda de LQ com a distância. Por isso a coluna da direita usa um critério
+      severo — perda causada por terceiros abaixo de 5 %, para ficar bem menor
+      que o efeito sob medição. Nessa régua, <em>três pares em 2,4 GHz</em> e
+      <em>um só em 433</em>.
+    </p>
+
+    <h3>O que ainda estica esses números</h3>
+    <p>
+      A conta é o pior caso: equipamentos amontoados, sinais de força parecida
+      chegando em cada receptor. Espalhados pelo campo, cada receptor ouve o seu
+      transmissor muito mais alto que os demais, e o LoRa decodifica o mais forte
+      quando a diferença passa de alguns decibéis — o que perdoa boa parte das
+      colisões. Taxas de pacote diferentes entre os pares também ajudam: a
+      modulação deixa de casar e o sinal alheio vira ruído em vez de concorrente.
+    </p>
+    <p>
+      Colisão também não corrompe estado: cada enlace tem semente de CRC própria,
+      derivada do UID. Um pacote alheio que chegue é <em>descartado</em>, não
+      confundido com o seu. O custo da colisão é o slot perdido, nada além dele.
+    </p>
+
+    <h3>E se a faixa for 432–435 MHz?</h3>
+    <p>
+      Mais espectro dá mais canais, mas menos do que se espera — porque o que
+      limita não é a largura da faixa, e sim <em>a largura de cada canal</em>. Os
+      modos sub-GHz do ExpressLRS ocupam 500 kHz, e é isso que divide a faixa:
+    </p>
+
+    <div class="scroll">
+      <table>
+        <caption>Quantos canais cabem</caption>
+        <thead>
+          <tr><th>Faixa</th><th class="n">Largura</th><th class="n">Canal</th><th class="n">Canais</th><th class="n">2 pares</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>EU433</td><td class="n">1,35 MHz</td><td class="n">500 kHz</td><td class="n">3</td><td class="n">67 %</td></tr>
+          <tr><td>432 – 435 MHz</td><td class="n">3,00 MHz</td><td class="n">500 kHz</td><td class="n">6</td><td class="n">33 %</td></tr>
+          <tr class="here"><td>432 – 435 MHz, modo estreito</td><td class="n">3,00 MHz</td><td class="n">125 kHz</td><td class="n">24</td><td class="n">8 %</td></tr>
+          <tr><td>2,4 GHz ISM</td><td class="n">79,0 MHz</td><td class="n">812 kHz</td><td class="n">80</td><td class="n">2,5 %</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      Dobrar a faixa dobra os canais e corta a perda pela metade — de 67 % para
+      33 % com um vizinho. Ajuda, não transforma. <em>O salto de verdade viria de
+      um modo mais estreito</em>: a 125 kHz cabem 24 canais em 432–435 MHz, e o
+      primeiro vizinho passa a custar 8 %. O rádio faz isso; a tabela de taxas do
+      ExpressLRS é que não oferece nenhum modo sub-GHz abaixo de 500 kHz.
+    </p>
+
+    <div class="flag">
+      <h3>Duas armadilhas que zeram a conta acima</h3>
+      <p>
+        <strong>Frases de binding iguais.</strong> A sequência de saltos é semeada
+        pelo UID, e o UID vem da frase. Dois pares com a mesma frase saltam <em>em
+        uníssono</em>: colidem em 100 % dos pacotes, não em 1,3 %. Cada par
+        precisa da sua frase.
+      </p>
+      <p>
+        <strong>WiFi em 2,4 GHz.</strong> Um canal WiFi ocupa 20 MHz — cerca de
+        <strong>20 dos 80 canais</strong> do enlace. Um ponto de acesso movimentado
+        ao lado pesa mais que vários pares ExpressLRS juntos. O painel destas
+        placas é um deles: sondando a 1 Hz o tráfego é magro, mas ele existe, e
+        transmite a centímetros do receptor.
+      </p>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════ anatel ══════════ -->
+  <section>
+    <div class="topic alt">Regulamentação</div>
+    <h2>O que a Anatel diz sobre cada uma das duas faixas</h2>
+
+    <p>
+      O regulamento que vale é a <strong>Resolução nº 680/2017</strong>, e os
+      requisitos técnicos estão no <strong>Ato nº 14.448/2017</strong>. Ler o texto
+      primário mudou o quadro, e num ponto ele inverte o que a potência do módulo
+      sugeria.
+    </p>
+
+    <h3>2,4 GHz — o enlace se encaixa com folga</h3>
+    <p>
+      O item 10 do Ato trata de equipamentos com espalhamento espectral, e lista
+      as faixas onde vale: <em>902–907,5 · 915–928 · 2.400–2.483,5 · 5.725–5.850 MHz</em>.
+      Os requisitos para saltos em 2,4 GHz são estes, e o ExpressLRS os atende
+      quase que por construção:
+    </p>
+    <div class="scroll">
+      <table>
+        <caption>Ato 14.448, item 10.2.6 · faixa 2.400–2.483,5 MHz</caption>
+        <thead><tr><th>Exigência</th><th>Limite</th><th>Este enlace</th></tr></thead>
+        <tbody>
+          <tr><td>Canais de salto não coincidentes</td><td class="n">mín. 15</td><td class="n">80 ✓</td></tr>
+          <tr><td>Potência de pico (≥ 75 canais)</td><td class="n">até 1 W</td><td class="n">17 mW ✓</td></tr>
+          <tr><td>Ocupação média por canal</td><td class="n">0,4 s em 32 s</td><td class="n">0,4 s ✓</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      A última linha não é coincidência: com 80 canais visitados por igual, cada
+      um recebe 32 ÷ 80 = <em>0,4 segundo</em> — exatamente o teto. O ExpressLRS foi
+      desenhado contra essa regra. E a folga de potência é enorme: a norma
+      permitiria 1 W, o módulo entrega 17 mW.
+    </p>
+
+    <h3>433 MHz — fora do item 10, e com teto baixo</h3>
+    <p>
+      A faixa de 433 MHz <em>não aparece</em> na lista do item 10. O que consta no
+      Ato para a região é o item 13, de identificação por radiofrequência (RFID),
+      restrito a 433,5–434,5 MHz. Fontes secundárias citam de forma consistente um
+      limite de <strong>10 mW e.i.r.p.</strong> para 433–435 MHz em radiação restrita
+      — número que não localizei no corpo do Ato 14.448 que li, e que precisa ser
+      confirmado na Resolução 680 antes de virar premissa de projeto.
+    </p>
+
+    <div class="flag">
+      <h3>Se os 10 mW valerem, a comparação se inverte</h3>
+      <p>
+        Eu havia escrito que 433 MHz seria a faixa mais forte, porque o módulo
+        chega a <strong>19,9 dBm</strong> lá contra 12,2 dBm em 2,4 GHz. Sob um teto
+        de 10 mW e.i.r.p. isso deixa de valer: 10 mW são <strong>10 dBm</strong>, e o
+        degrau mais baixo deste hardware em 433 já é 9,9 dBm.
+      </p>
+      <p>
+        Ou seja: em 433 sobraria <em>um único nível de potência</em>, o menor, e
+        ainda com antena de ganho nulo — qualquer ganho de antena entra no
+        e.i.r.p. Em 2,4 GHz, a mesma norma permitiria 1 W e o módulo usa 17 mW.
+        A vantagem de potência de 433 é do módulo, não da faixa.
+      </p>
+    </div>
+
+    <p>
+      Nada aqui é parecer jurídico — é a leitura do texto e o que ela implica para
+      o projeto. Antes de campanha em 433 vale confirmar o enquadramento com a
+      Anatel, porque o enlace usa <em>saltos em frequência com 500 kHz de canal</em>,
+      e o item que autoriza essa técnica não menciona 433 MHz.
+    </p>
+  </section>
+
+  <p class="fine">
+    Números de tempo no ar, sensibilidade, intervalo de salto e grade de canais
+    saem das tabelas do próprio firmware — <code>ExpressLRS_AirRateRFperf</code>,
+    <code>ExpressLRS_AirRateConfig</code> e <code>domains[]</code>. A cadência de
+    46,7 pacotes por segundo foi medida na saída CRSF do receptor, a 420000 baud,
+    com verificação de CRC-8 em cada quadro. A fórmula de convivência
+    <code>2 × (pares − 1) / canais</code> e o limiar de <i>failsafe</i> acima de
+    uma dúzia de transmissores vêm dos mantenedores do ExpressLRS
+    (<a href="https://github.com/ExpressLRS/ExpressLRS/discussions/2119">discussão 2119</a>);
+    o tempo de 4 s sem pacote antes da desconexão é o
+    <code>DisconnectTimeoutMs</code> desta taxa, lido no firmware. Os números por
+    plano de banda são estimados a partir dessas grandezas, não medidos com
+    vários equipamentos — valem como ponto de partida para o teste, não como
+    resultado dele. O enquadramento regulatório vem da leitura do
+    <a href="https://informacoes.anatel.gov.br/legislacao/index.php/component/content/article?id=1139">Ato nº 14.448/2017</a>
+    e da <a href="https://informacoes.anatel.gov.br/legislacao/index.php/component/content/article?id=936">Resolução nº 680/2017</a>;
+    o limite de 10 mW e.i.r.p. em 433–435 MHz aparece em fontes secundárias e
+    <em>não foi localizado</em> no corpo do Ato — confirmar antes de usar como
+    premissa.
+  </p>
+
+</div>
+</body>
+</html>
