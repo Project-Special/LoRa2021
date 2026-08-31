@@ -1389,6 +1389,10 @@ async function renderDbMap() {
       maxZoom: 19,
     }).addTo(DB.map);
     DB.layer = L.layerGroup().addTo(DB.map);
+
+    // Barra de escala: da a ordem de grandeza sem exigir clique nenhum.
+    L.control.scale({ metric: true, imperial: false, maxWidth: 160 }).addTo(DB.map);
+    montarRegua(DB.map);
   }
   DB.layer.clearLayers();
   DB.map.invalidateSize();
@@ -1460,6 +1464,118 @@ async function renderDbMap() {
   const pts = rows.map((r) => [r.latitude, r.longitude]);
   if (hasOrigin) pts.push([o.origin_lat, o.origin_lon]);
   DB.map.fitBounds(L.latLngBounds(pts).pad(0.15));
+}
+
+/* Regua: distancia entre dois pontos quaisquer do mapa.
+   Os aneis de referencia so existem quando a campanha tem origem gravada, e a
+   distancia por ponto e sempre ATE O TRANSMISSOR. Nenhuma das duas responde
+   "quanto ha entre estes dois lugares" -- que numa campanha de alcance e a
+   pergunta de sempre: entre o ultimo ponto com enlace e o primeiro sem ele. */
+function montarRegua(map) {
+  let ativa = false;
+  let a = null;
+  const camada = L.layerGroup().addTo(map);
+  let linhaViva = null;
+  let etiqueta = null;
+  let botao = null;
+
+  const etiquetaEm = (ll, texto, forte) => L.marker(ll, {
+    icon: L.divIcon({
+      className: '',
+      html: `<b style="background:${forte ? '#137fec' : 'rgba(19,127,236,.75)'};color:#fff;` +
+            `padding:3px 8px;border-radius:3px;font:600 12px/1 system-ui;` +
+            `white-space:nowrap">${texto}</b>`,
+      iconAnchor: [-10, 8],
+    }),
+    interactive: false,
+  });
+
+  const dica = (txt) => {
+    const el = $('dbMapDica');
+    if (el) { el.textContent = txt || ''; el.hidden = !txt; }
+  };
+
+  const desliga = () => {
+    ativa = false;
+    a = null;
+    camada.clearLayers();
+    linhaViva = etiqueta = null;
+    if (botao) { botao.style.background = ''; botao.style.color = ''; }
+    map.getContainer().style.cursor = '';
+    dica('');
+  };
+
+  const Botao = L.Control.extend({
+    options: { position: 'topleft' },
+    onAdd() {
+      const div = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
+      botao = L.DomUtil.create('a', '', div);
+      botao.href = '#';
+      botao.title = 'Medir a distância entre dois pontos';
+      // Rotulo por extenso: um simbolo sozinho na barra nao se acha, e a
+      // ferramenta so serve se alguem souber que ela existe.
+      botao.textContent = 'Medir';
+      botao.style.cssText = 'font:600 12px/26px system-ui;text-align:center;' +
+                            'width:auto;padding:0 10px;letter-spacing:.04em';
+      L.DomEvent.on(botao, 'click', (e) => {
+        L.DomEvent.stop(e);
+        if (ativa) { desliga(); return; }
+        ativa = true;
+        a = null;
+        camada.clearLayers();
+        botao.style.background = '#137fec';
+        botao.style.color = '#fff';
+        map.getContainer().style.cursor = 'crosshair';
+        dica('Clique no primeiro ponto');
+      });
+      return div;
+    },
+  });
+  map.addControl(new Botao());
+
+  // Enquanto arrasta o mouse depois do primeiro clique, a distancia acompanha.
+  // Sem isso a regua so responde no fim, e nao da para "procurar" um valor.
+  map.on('mousemove', (ev) => {
+    if (!ativa || !a) return;
+    const m = map.distance(a, ev.latlng);
+    if (linhaViva) linhaViva.setLatLngs([a, ev.latlng]);
+    else linhaViva = L.polyline([a, ev.latlng], {
+      color: '#137fec', weight: 2, opacity: .7, dashArray: '6 6',
+    }).addTo(camada);
+    if (etiqueta) camada.removeLayer(etiqueta);
+    etiqueta = etiquetaEm(ev.latlng, fmtDist(m), false).addTo(camada);
+  });
+
+  map.on('click', (ev) => {
+    if (!ativa) return;
+    if (a) {
+      // map.distance devolve metros sobre o elipsoide -- distancia no chao,
+      // nao na tela: vale em qualquer zoom e em qualquer latitude.
+      const m = map.distance(a, ev.latlng);
+      camada.clearLayers();
+      linhaViva = etiqueta = null;
+      L.polyline([a, ev.latlng], { color: '#137fec', weight: 3 }).addTo(camada);
+      for (const ll of [a, ev.latlng]) {
+        L.circleMarker(ll, {
+          radius: 5, color: '#fff', weight: 2, fillColor: '#137fec', fillOpacity: 1,
+        }).addTo(camada);
+      }
+      etiquetaEm(ev.latlng, fmtDist(m), true).addTo(camada);
+      a = null;
+      dica('Clique para medir de novo, ou toque em Medir para sair');
+    } else {
+      camada.clearLayers();
+      linhaViva = etiqueta = null;
+      a = ev.latlng;
+      L.circleMarker(a, {
+        radius: 5, color: '#fff', weight: 2, fillColor: '#137fec', fillOpacity: 1,
+      }).addTo(camada);
+      dica('Clique no segundo ponto');
+    }
+  });
+
+  // Sair da campanha nao pode deixar a regua armada por baixo.
+  map.on('unload', desliga);
 }
 
 /* --- troca de aba ---------------------------------------------------------
