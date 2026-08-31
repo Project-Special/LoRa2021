@@ -20,25 +20,33 @@
     "_comentario_tcxo": "modulo sem TCXO (medido): campo radio_tcxo ausente de proposito",
     "radio_dcdc": false,
     "power_min": 0,
-    "power_high": 3,
-    "power_max": 3,
-    "power_default": 0,
+    "power_high": 7,
+    "power_max": 7,
+    "power_default": 4,
     "power_control": 0,
     "power_values": [
+        -11,
+        -3,
+        5,
+        13,
         20,
         28,
-        34,
-        40
+        36,
+        44
     ],
     "power_values_dual": [
-        16,
-        20,
-        22,
+        -12,
+        -7,
+        -2,
+        4,
+        9,
+        14,
+        19,
         24
     ],
     "power_lna_gain": 12,
-    "led": 2,
     "screen_type": 0,
     "use_backpack": false,
-    "_comentario_serial": "ESP32-S3: UART0 da ponte CH340 esta em GPIO43/44. 1 e 3 sao do ESP32 classico, e o 1 aqui e o radio_busy"
+    "_comentario_serial": "ESP32-S3: UART0 da ponte CH340 esta em GPIO43/44. 1 e 3 sao do ESP32 classico, e o 1 aqui e o radio_busy",
+    "_comentario_led": "SEM campo led de proposito: o GPIO2 do S3 leva o DIO9/IRQ do modulo LoRa2021. Declarar o LED ali fazia o devLED escrever na linha de interrupcao do radio — o fim-de-transmissao se perdia e o TX travava sem erro nenhum. O LED de bordo do DevKitC-1 e WS2812 endereçavel e nao acende com digitalWrite, entao nao ha o que ligar aqui."
 }

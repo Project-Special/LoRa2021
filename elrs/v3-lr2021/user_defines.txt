@@ -13,9 +13,37 @@
 # Obrigatório: o LR2021 é tratado como rádio sub-GHz (banda primária).
 # Brasil: 902-907,5 / 915-928 MHz -> AU_915.
 # O lado 2.4 GHz usa ISM2G4 automaticamente (tabela domainsDualBand).
--DRegulatory_Domain_AU_915
+# 433 MHz para a campanha de alcance em faixa baixa. EU433 (433,1-434,45 MHz)
+# fica dentro da faixa ISM de 433 usada mundialmente; US_433_WIDE daria 20
+# canais de salto em vez de 3, mas varre 423,5-438 MHz, fora de qualquer
+# alocacao ISM. Trocar aqui NAO afeta 2,4 GHz: aquele lado usa a tabela
+# domainsDualBand, que e fixa em ISM2G4.
+#-DRegulatory_Domain_AU_915
 #-DRegulatory_Domain_FCC_915
 #-DRegulatory_Domain_EU_868
+# FAIXA FISICA DO MODULO (variante 433 do LoRa2021).
+#
+# O modulo e de banda sub-GHz UNICA: a rede de casamento sai de fabrica
+# sintonizada para uma faixa, e a serigrafia marca qual. Estes sao os limites do
+# datasheet para a variante 433 -- Frequency Range @433MHz: 400 a 460 MHz.
+#
+# Nao limita o firmware: serve para o painel MARCAR os planos que este hardware
+# nao consegue casar. Escolher EU868 aqui nao daria erro nenhum, o radio
+# sintonizaria, e o alcance seria uma fracao do esperado sem nada na tela
+# explicando por que. Trocando de modulo, troque estes dois numeros.
+# DESLIGADO: o modulo definitivo ainda nao esta escolhido, e marcar planos como
+# "fora da faixa" a partir de um palpite e pior que nao marcar nada -- afasta de
+# uma banda que talvez seja a certa. Sem estes dois defines o painel oferece
+# todos os planos sem juizo de valor.
+#
+# Quando o modulo estiver definido, descomente e ponha a faixa da variante
+# (datasheet, Frequency Range): 433 -> 400/460 · 470 -> 470/510 · 868 -> 850/890
+# · 915 -> 900/940. O painel volta a marcar sozinho.
+#-DLF_MIN_MHZ=400
+#-DLF_MAX_MHZ=460
+
+-DRegulatory_Domain_EU_433
+#-DRegulatory_Domain_US_433_WIDE
 
 
 ### PERFORMANCE ###

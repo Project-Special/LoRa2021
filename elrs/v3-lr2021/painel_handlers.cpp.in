@@ -1,0 +1,616 @@
+// overlay v3-lr2021: painel do projeto.
+//
+// Este arquivo e INSERIDO em devWIFI.cpp pelo apply_overlay.py. Ele vive aqui
+// como C, e nao dentro de uma string do Python, porque JSON em C e feito de
+// aspas escapadas -- e escapar aspas dentro de uma string de Python que gera
+// C e a receita para o erro que ja aconteceu aqui duas vezes.
+
+// Vale para TX e RX. Ha UM app, e ele e o mesmo nas duas placas: quem abre o
+// endereco de qualquer uma cai no painel, nao na pagina do ExpressLRS.
+//
+// O que cada papel MEDE e diferente, e so isso e cercado:
+//
+//   RX   recebe pacotes -> tem RSSI, SNR e qualidade de enlace
+//   TX   transmite      -> nao mede sinal recebido; tem os canais que envia
+//
+// Campo que o papel nao mede fica FORA do JSON: o painel trata ausente como
+// "sem leitura" e escreve um traco. Zero seria afirmacao, e afirmar "RSSI 0
+// dBm" num transmissor e mentir com precisao de uma casa.
+
+// Global de rx_main.cpp que o upstream nunca exportou num header. Declarado
+// aqui em vez de mexer no common.h: por um painel nao vale espalhar a mudanca.
+#if defined(TARGET_TX)
+// CRSF::LinkStatistics guarda o que este lado mediu no ultimo pacote de
+// telemetria. So existe no transmissor -- a lib Handset nao entra no RX.
+#include "CRSF.h"
+// Quando o ultimo pacote de telemetria chegou. Vive no tx_main, sem cabecalho
+// proprio -- e a diferenca entre "nao ha leitura" e "nunca houve retorno".
+extern volatile uint32_t LastTLMpacketRecvMillis;
+#endif
+
+#if defined(TARGET_RX)
+extern uint8_t uplinkLQ;
+#endif
+
+// Canais SOZINHOS, para o painel buscar rapido.
+//
+// O /api/state carrega o resto; monta-lo 20 vezes por segundo e desperdicio, e
+// busca-lo a 1 Hz deixa um manche de 50 Hz com atraso visivel a olho nu. Esta
+// rota cabe em ~110 bytes e o ESP a monta em microssegundos.
+static void HandlePainelRc(AsyncWebServerRequest *request)
+{
+  const bool ligado = (connectionState == connected);
+#if defined(TARGET_RX)
+  const int lq = ligado ? uplinkLQ : 0;
+#else
+  // No transmissor nao ha qualidade de enlace de subida para medir: quem conta
+  // pacote perdido e quem recebe. 255 = sem medida.
+  const int lq = 255;
+#endif
+
+  char buf[192];
+  int n = snprintf(buf, sizeof(buf), "{\"lq\":%d,\"linked\":%s,\"rc\":[",
+                   lq, ligado ? "true" : "false");
+  for (uint8_t i = 0; i < 16 && n > 0 && n < (int)sizeof(buf) - 8; i++)
+  {
+    n += snprintf(buf + n, sizeof(buf) - n, "%s%u", i ? "," : "",
+                  (unsigned)ChannelData[i]);
+  }
+  if (n > 0 && n < (int)sizeof(buf) - 4) snprintf(buf + n, sizeof(buf) - n, "]}");
+
+  AsyncWebServerResponse *r = request->beginResponse(200, "application/json", buf);
+  r->addHeader("Access-Control-Allow-Origin", "*");
+  request->send(r);
+}
+
+// Arquivos do painel, gzipados no flash. Ver gerar_painel_embutido().
+static void HandlePainelFile(AsyncWebServerRequest *request)
+{
+  const String u = request->url();
+  const uint8_t *dados = painel_index_html;
+  size_t tam = painel_index_html_len;
+  const char *tipo = "text/html";
+
+  if (u.endsWith("app.js")) {
+    dados = painel_app_js;    tam = painel_app_js_len;    tipo = "application/javascript";
+  } else if (u.endsWith("style.css")) {
+    dados = painel_style_css; tam = painel_style_css_len; tipo = "text/css";
+  }
+
+  AsyncWebServerResponse *r = request->beginResponse_P(200, tipo, dados, tam);
+  // O conteudo esta gzipado no flash; quem descomprime e o navegador.
+  r->addHeader("Content-Encoding", "gzip");
+  request->send(r);
+}
+
+// Estado completo, no MESMO formato do /api/state do firmware de bancada --
+// assim o app.js nao precisa saber em qual firmware esta falando, e nao ha
+// duas versoes do painel para manter em sincronia.
+//
+// O que este firmware NAO mede sai fora do JSON, e nao como zero. O painel
+// trata campo ausente como "sem leitura" e escreve um traco; um zero seria
+// afirmacao -- "potencia 0 dBm", "tempo no ar 0 ms" -- e o painel mostrava
+// exatamente isso, numeros que ninguem mediu.
+// Potencia REAL do modulo, em decimos de dBm.
+//
+// O ExpressLRS reporta o ROTULO do nivel: PWR_100mW -> "20 dBm". Isso e o nome
+// da gaveta, nao o que sai da antena. O datasheet do LoRa2021 (NiceRF rev 1.3,
+// secao 8) mede o modulo e mostra a distancia: no nivel maximo deste hardware
+// sai 12,2 dBm em 2,4 GHz -- nao 20. Numa campanha de alcance, 8 dB de engano
+// no eixo da potencia invalida a comparacao entre campanhas.
+//
+// A tabela abaixo e a do datasheet: valor de registrador -> dBm medido. O que o
+// firmware guarda em power_values / power_values_dual sao esses registradores,
+// entao a conversao e uma interpolacao entre os pontos medidos.
+typedef struct { int16_t reg; int16_t dbm10; } ponto_pot_t;
+
+// Sub-GHz @433 MHz e @915 MHz: as colunas diferem ~0,5 dB, e a coluna certa
+// depende da banda em uso -- por isso a escolha e por frequencia, e nao por um
+// #define fixado na compilacao.
+static const ponto_pot_t POT_433[] = {
+  {-11,-54},{-5,-24},{1,6},{7,36},{13,63},{19,94},{25,126},{31,157},{37,186},{44,214}
+};
+static const ponto_pot_t POT_915[] = {
+  {-11,-43},{-5,-14},{1,15},{7,44},{13,73},{19,103},{25,134},{31,165},{37,195},{44,219}
+};
+static const ponto_pot_t POT_2G4[] = {
+  {-12,-50},{-8,-30},{-4,-14},{0,6},{4,24},{8,45},{12,64},{16,84},{20,103},{24,122}
+};
+
+static int interpolaPot(const ponto_pot_t *t, int n, int reg)
+{
+  if (reg <= t[0].reg) return t[0].dbm10;
+  if (reg >= t[n - 1].reg) return t[n - 1].dbm10;
+  for (int i = 1; i < n; i++)
+  {
+    if (reg <= t[i].reg)
+    {
+      const int dr = t[i].reg - t[i - 1].reg;
+      const int dd = t[i].dbm10 - t[i - 1].dbm10;
+      return t[i - 1].dbm10 + (dd * (reg - t[i - 1].reg)) / dr;
+    }
+  }
+  return t[n - 1].dbm10;
+}
+
+// dBm reais do NIVEL, na banda em uso. Devolve INT16_MIN quando o nivel nao
+// existe neste hardware -- campo ausente e melhor que numero inventado.
+static int potenciaNivelDbm10(int nivel, bool is2g4, float freqMHz)
+{
+  const int16_t *tab = is2g4 ? POWER_OUTPUT_VALUES_DUAL : POWER_OUTPUT_VALUES;
+  const int cnt = is2g4 ? POWER_OUTPUT_VALUES_DUAL_COUNT : POWER_OUTPUT_VALUES_COUNT;
+  if (!tab || cnt <= 0 || nivel < 0 || nivel >= cnt) return INT16_MIN;
+
+  const int reg = tab[nivel];
+  if (is2g4) return interpolaPot(POT_2G4, 10, reg);
+  return freqMHz < 600.0f ? interpolaPot(POT_433, 10, reg)
+                          : interpolaPot(POT_915, 10, reg);
+}
+
+// Qual placa e esta. Os dois lados serviam o painel dizendo "ELRS", e nao havia
+// como saber de qual delas era a tela aberta -- diferenca que importa, porque
+// varios campos so existem de um lado.
+#if defined(TARGET_TX)
+#define NOME_NO "ELRS TX"
+#else
+#define NOME_NO "ELRS RX"
+#endif
+
+static void HandlePainelState(AsyncWebServerRequest *request)
+{
+  const bool ligado = (connectionState == connected);
+
+  // Quadros por segundo da taxa em uso -- e o numero que responde "esta
+  // chegando pacote AGORA?". Um acumulado desde o boot nao responderia isso, e
+  // o LQ ao lado ja diz a fracao que sobrevive.
+  const expresslrs_mod_settings_t *m = ExpressLRS_currAirRate_Modparams;
+  // A cadencia vem da CONFIGURACAO, nao do enlace.
+  //
+  // Estava condicionada a `ligado`, e no transmissor isso significa "recebi
+  // telemetria de volta" -- coisa que pode nao acontecer e nao tem relacao com
+  // a taxa em que ele transmite. O resultado era "RECEBIDOS 0" num transmissor
+  // que estava mandando 50 pacotes por segundo.
+  const unsigned taxa = (m && m->interval) ? (unsigned)(1000000 / m->interval) : 0u;
+
+  // Traducao dos campos de modem: o que a tabela de taxas guarda sao CODIGOS DE
+  // REGISTRO do LR2021, nao os valores de engenharia.
+  //
+  // O SF coincide por acaso (LR2021_RADIO_LORA_SF8 == 0x08), e foi isso que
+  // escondeu o problema no CR: LR2021_RADIO_LORA_CR_LI_4_8 vale 0x07, e o
+  // painel exibia "4/7" para um enlace que roda em 4/8 com interleaver longo.
+  // Codigo de registro em campo de engenharia parece certo ate alguem somar.
+  float bwKHz = 0.0f;
+  switch (m ? m->bw : 0)
+  {
+    case 0x03: bwKHz = 62.5f;  break;
+    case 0x06: bwKHz = 500.0f; break;
+    case 0x0F: bwKHz = 812.5f; break;   // 2G4, o unico usado nestas taxas
+    default:   bwKHz = 0.0f;   break;
+  }
+
+  // Denominador N de 4/N. As variantes LI sao codificacoes diferentes das
+  // curtas, e o ExpressLRS usa LI em todas as taxas de 2,4 GHz.
+  unsigned crN = 0;
+  bool crLI = false;
+  switch (m ? m->cr : 0)
+  {
+    case 0x01: crN = 5; break;
+    case 0x02: crN = 6; break;
+    case 0x03: crN = 7; break;
+    case 0x04: crN = 8; break;
+    case 0x05: crN = 5; crLI = true; break;
+    case 0x06: crN = 6; crLI = true; break;
+    case 0x07: crN = 8; crLI = true; break;
+    default:   crN = 0; break;
+  }
+  (void)crLI;
+
+  // Tempo no ar e intervalo sao coisas DIFERENTES, e em 433 MHz a diferenca
+  // aparece: 18,6 ms de portadora dentro de uma janela de 20 ms. Enquanto so
+  // havia 2,4 GHz o painel mandava o intervalo no campo "toa" e ninguem
+  // percebia; com as duas bandas isso vira numero errado na tela.
+  const float toaMs = ExpressLRS_currAirRate_RFperfParams
+                    ? ExpressLRS_currAirRate_RFperfParams->TOA / 1000.0f : 0.0f;
+  const unsigned intervalo = (m && m->interval) ? (unsigned)(m->interval / 1000) : 0u;
+
+  // Banda, frequencia e faixa de potencia saem da TAXA EM USO, nao de
+  // literais. Enquanto so havia 2,4 GHz um literal passava; com a tabela do
+  // LR2021 tendo entradas sub-GHz e de 2,4 GHz, um painel que afirma a banda
+  // sem olhar o radio mente exatamente na hora em que a informacao importa.
+  //
+  // FHSSgetInitialFreq() ja sabe qual das duas tabelas vale -- ele segue
+  // FHSSusePrimaryFreqBand, que rx_main/tx_main ajustam pelo radio_type. E o
+  // canal de SYNC, o mesmo numero que o painel sempre mostrou em 2,4 GHz.
+  const bool is2g4 = m && m->radio_type == RADIO_TYPE_LR2021_LORA_2G4;
+  const float freqMHz = (float)FHSSgetInitialFreq() / 1000000.0f;
+
+  // Identificador de banda no vocabulario do painel, deduzido da frequencia --
+  // nao ha porque duplicar aqui a tabela de dominios do FHSS.
+  const char *bandaId = freqMHz < 460.0f  ? "433"   // 460: CN470 tem centro em 490
+                      : freqMHz < 600.0f  ? "470"
+                      : freqMHz < 900.0f  ? "868"
+                      : freqMHz < 1000.0f ? "915"
+                      : "2g4";
+
+  // Faixa REAL deste modulo, nao a do chip: os limites do PA do LR2021 (LF
+  // -22..+22, HF -19..+12 dBm) sao o que o silicio permite; o que sai da antena
+  // depende dos niveis que o layout declarou. Com power_values_dual chegando a
+  // 12,2 dBm em 2,4 GHz, anunciar +12 do chip ainda seria quase certo -- mas
+  // por acidente, e o mesmo acidente nao se repete em 433.
+  const int pmin10 = potenciaNivelDbm10((int)MinPower, is2g4, freqMHz);
+  const int pmax10 = potenciaNivelDbm10((int)MaxPower, is2g4, freqMHz);
+  const int pnow10 = potenciaNivelDbm10((int)POWERMGNT::currPower(), is2g4, freqMHz);
+  const float pmin = pmin10 == INT16_MIN ? 0.0f : pmin10 / 10.0f;
+  const float pmax = pmax10 == INT16_MIN ? 0.0f : pmax10 / 10.0f;
+  const float pnow = pnow10 == INT16_MIN ? 0.0f : pnow10 / 10.0f;
+
+  // 2 kB. As listas de taxas (12), planos (9) e potencias (4) somam mais de
+  // 1 kB sozinhas, e elas crescem quando o firmware ganha modos.
+  char buf[2048];
+  int n = snprintf(buf, sizeof(buf),
+    "{\"node\":\"%s\",\"band\":\"%s\",\"freq\":%.3f,"
+    "\"sf\":%u,\"bw\":%.2f,\"cr\":%u,\"power\":%.1f,"
+    "\"pmin\":%.1f,\"pmax\":%.1f,\"hf\":%s,\"rate\":%u,\"domain\":%u,\"tlm\":%d,\"tlmDenom\":%u,"
+    "\"rx\":%u,\"lost\":0,\"linked\":%s,"
+    "\"toa\":%.1f,\"interval\":%u,\"tx\":0,\"err\":0,\"rtt\":0,\"radioOk\":true,"
+    "\"rcMax\":2047,\"rc\":[%u,%u,%u,%u],\"rcAll\":[",
+    NOME_NO, bandaId, freqMHz,
+    (unsigned)(m ? m->sf : 0), bwKHz, crN,
+    pnow,
+    pmin, pmax, is2g4 ? "true" : "false",
+    (unsigned)(m ? m->index : 0),
+    (unsigned)firmwareOptions.domain,
+#if defined(TARGET_TX)
+    // A razao CONFIGURADA. So o transmissor a possui: e ele quem a decide e a
+    // anuncia no pacote de SYNC.
+    (int)config.GetTlm(),
+#else
+    // No receptor nao existe razao configurada -- ele obedece ao SYNC. -1 diz
+    // ao painel para mostrar o estado, e nao um seletor que nao controla nada.
+    -1,
+#endif
+    // A razao EFETIVA, como denominador (1 = sem telemetria). Vale nos dois
+    // lados e e a unica prova de que o canal de volta esta no ar: no receptor
+    // este valor chega pelo SYNC, entao ele reporta o que o TX de fato mandou.
+    (unsigned)ExpressLRS_currTlmDenom,
+    taxa, ligado ? "true" : "false", toaMs, intervalo,
+    (unsigned)ChannelData[0], (unsigned)ChannelData[1],
+    (unsigned)ChannelData[2], (unsigned)ChannelData[3]);
+
+  for (uint8_t i = 0; i < 16 && n > 0 && n < (int)sizeof(buf) - 8; i++)
+  {
+    n += snprintf(buf + n, sizeof(buf) - n, "%s%u", i ? "," : "",
+                  (unsigned)ChannelData[i]);
+  }
+  if (n > 0 && n < (int)sizeof(buf) - 8) n += snprintf(buf + n, sizeof(buf) - n, "]");
+
+  // AS MEDIDAS VEM ANTES DOS MENUS. Nao e estetica.
+  //
+  // Todo campo daqui para baixo e escrito sob um "se ainda couber". Com as
+  // listas de taxas, planos e potencias no mesmo buffer, elas encheram o espaco
+  // e o RSSI -- que vinha depois -- foi descartado em silencio: o painel
+  // mostrava ENLACE ATIVO e traco no sinal ao mesmo tempo. Menu que rouba lugar
+  // de medida e o defeito; a ordem e a correcao.
+  //
+  // Aqui, e nao mais acima: acima o array "rcAll" ainda esta ABERTO, e enfiar
+  // campos dentro dele produz JSON invalido -- o painel inteiro para de ler o
+  // estado e so os mostradores de manche continuam, porque vem de /api/rc.
+  // RSSI e SNR so entram COM enlace. Sem pacote chegando o driver guarda a
+  // ultima leitura, e publica-la faria o painel mostrar um sinal que nao existe
+  // mais -- o mesmo erro do rssi=0 que ja custou uma campanha inteira aqui.
+#if defined(TARGET_RX)
+  if (ligado && n > 0 && n < (int)sizeof(buf) - 64)
+  {
+    n += snprintf(buf + n, sizeof(buf) - n, ",\"rssi\":%d,\"snr\":%d,\"lq\":%d",
+                  (int)Radio.LastPacketRSSI, (int)(Radio.LastPacketSNRRaw / 4),
+                  (int)uplinkLQ);
+  }
+#endif
+
+#if defined(TARGET_TX)
+  // POR QUE nao ha leitura.
+  //
+  // Um traco no painel responde "nao sei" a duas perguntas diferentes: o canal
+  // de volta nunca existiu, ou existiu e parou. Sao defeitos distintos, com
+  // lugares distintos para procurar. `tlmIdade` traz os milissegundos desde o
+  // ultimo pacote de telemetria, ou -1 se nenhum jamais chegou.
+  {
+    const uint32_t ultimo = LastTLMpacketRecvMillis;
+    const long idade = ultimo ? (long)(millis() - ultimo) : -1L;
+    if (n > 0 && n < (int)sizeof(buf) - 32)
+      n += snprintf(buf + n, sizeof(buf) - n, ",\"tlmIdade\":%ld", idade);
+  }
+
+  // O que o TRANSMISSOR ouve -- e so existe se houver telemetria de volta.
+  //
+  // Estes campos sao os "downlink_*" do CRSF, e o nome engana: nao sao o que a
+  // outra ponta relatou, sao a medida do proprio radio deste lado sobre o
+  // pacote de telemetria que chegou (tx_main.cpp: downlink_RSSI_1 =
+  // Radio.LastPacketRSSI). E exatamente a leitura que a bancada quer.
+  //
+  // Sem enlace nada e publicado: o driver guarda a ultima leitura, e mostra-la
+  // como atual foi o erro que ja custou uma campanha inteira aqui. Campo
+  // ausente vira traco no painel; zero viraria "sinal maximo".
+  if (connectionState == connected && n > 0 && n < (int)sizeof(buf) - 64)
+  {
+    n += snprintf(buf + n, sizeof(buf) - n, ",\"rssi\":%d,\"snr\":%d,\"lq\":%d",
+                  (int)(int8_t)CRSF::LinkStatistics.downlink_RSSI_1,
+                  (int)CRSF::LinkStatistics.downlink_SNR,
+                  (int)CRSF::LinkStatistics.downlink_Link_quality);
+  }
+#endif
+
+  // O UID existe: e o que a frase de binding gerou na gravacao. A FRASE nao --
+  // ela nao e guardada, e por isso o painel esconde aquele campo em vez de
+  // mostrar uma caixa vazia que ninguem consegue preencher.
+  if (n > 0 && n < (int)sizeof(buf) - 64)
+  {
+    n += snprintf(buf + n, sizeof(buf) - n,
+                  ",\"uid\":\"%02X %02X %02X %02X %02X %02X\"",
+                  UID[0], UID[1], UID[2], UID[3], UID[4], UID[5]);
+  }
+
+
+  // As taxas DISPONIVEIS, ditas pelo firmware.
+  //
+  // O painel poderia trazer a tabela embutida, e ela ficaria errada no dia em
+  // que o firmware mudasse -- e o painel vive DENTRO do firmware, entao a
+  // duplicata seria gratuita. Aqui vai indice, cadencia e banda; o resto o
+  // painel ja recebe da taxa em uso.
+  //
+  // isSupportedRFRate filtra o que este hardware nao consegue: sem valores de
+  // potencia sub-GHz, as taxas de 900 nao aparecem, e vice-versa.
+  {
+    const float centroSubG = (float)FHSSconfig->freq_center / 1000000.0f;
+    const char *bandaSubG = centroSubG < 460.0f  ? "433"
+                          : centroSubG < 600.0f  ? "470"
+                          : centroSubG < 900.0f  ? "868"
+                          : "915";
+    n += snprintf(buf + n, sizeof(buf) - n, ",\"rates\":[");
+    bool primeiro = true;
+    for (uint8_t i = 0; i < RATE_MAX && n > 0 && n < (int)sizeof(buf) - 48; i++)
+    {
+      if (!isSupportedRFRate(i)) continue;
+      const expresslrs_mod_settings_s *r = get_elrs_airRateConfig(i);
+      if (!r || !r->interval) continue;
+      const bool r2g4 = r->radio_type == RADIO_TYPE_LR2021_LORA_2G4;
+      // c8 marca os modos de 8 canais: sem isso duas taxas de 100 Hz aparecem
+      // com o MESMO rotulo na lista, e escolher vira sorteio.
+      n += snprintf(buf + n, sizeof(buf) - n, "%s{\"i\":%u,\"hz\":%u,\"b\":\"%s\",\"c8\":%u}",
+                    primeiro ? "" : ",", (unsigned)i,
+                    (unsigned)(1000000 / r->interval), r2g4 ? "2g4" : bandaSubG,
+                    (unsigned)(r->PayloadLength == 13U ? 1 : 0));   // OTA8_PACKET_SIZE
+      primeiro = false;
+    }
+    if (n > 0 && n < (int)sizeof(buf) - 8) n += snprintf(buf + n, sizeof(buf) - n, "]");
+  }
+
+  // Os planos de banda sub-GHz que este firmware conhece.
+  //
+  // O 2,4 GHz nao entra: ele tem um plano so (ISM2G4) e nao e escolhivel. Aqui
+  // e so o lado que o dominio regulatorio decide -- e que ate agora era decidido
+  // na compilacao, sem chegar a valer. Ver patch_dominios().
+  if (n > 0 && n < (int)sizeof(buf) - 200)
+  {
+    n += snprintf(buf + n, sizeof(buf) - n, ",\"domains\":[");
+    const uint8_t nd = FHSSdomainCount();
+    for (uint8_t i = 0; i < nd && n > 0 && n < (int)sizeof(buf) - 40; i++)
+    {
+      const fhss_config_t *d = FHSSdomainAt(i);
+      const float mhz = (float)d->freq_center / 1000000.0f;
+      // "ok" diz se o MODULO casa nessa faixa -- ver LF_MIN_MHZ em
+      // user_defines.txt. Sem isso o painel ofereceria nove planos como se os
+      // nove funcionassem, e oito deles nao funcionam nesta variante.
+#if defined(LF_MIN_MHZ) && defined(LF_MAX_MHZ)
+      const bool casa = mhz >= (float)LF_MIN_MHZ && mhz <= (float)LF_MAX_MHZ;
+#else
+      const bool casa = true;
+#endif
+      n += snprintf(buf + n, sizeof(buf) - n,
+                    "%s{\"i\":%u,\"nome\":\"%s\",\"mhz\":%.1f,\"ch\":%u,\"ok\":%s}",
+                    i ? "," : "", (unsigned)i, d->domain, mhz,
+                    (unsigned)d->freq_count, casa ? "true" : "false");
+    }
+    if (n > 0 && n < (int)sizeof(buf) - 8) n += snprintf(buf + n, sizeof(buf) - n, "]");
+  }
+
+  // Os niveis de potencia DESTE hardware, com o dBm medido de cada um.
+  //
+  // Sao quatro degraus, nao um continuo: o painel oferecia um campo numerico em
+  // dBm, e digitar 18 num hardware que so tem 9,9 / 13,6 / 17,0 / 19,9 gera uma
+  // discussao silenciosa entre o que se pediu e o que foi aplicado.
+  if (n > 0 && n < (int)sizeof(buf) - 96)
+  {
+    n += snprintf(buf + n, sizeof(buf) - n, ",\"powers\":[");
+    bool primeiro = true;
+    for (int i = (int)MinPower; i <= (int)MaxPower && n > 0 && n < (int)sizeof(buf) - 32; i++)
+    {
+      const int d10 = potenciaNivelDbm10(i, is2g4, freqMHz);
+      if (d10 == INT16_MIN) continue;
+      n += snprintf(buf + n, sizeof(buf) - n, "%s{\"i\":%d,\"dbm\":%.1f}",
+                    primeiro ? "" : ",", i, d10 / 10.0f);
+      primeiro = false;
+    }
+    if (n > 0 && n < (int)sizeof(buf) - 8) n += snprintf(buf + n, sizeof(buf) - n, "]");
+  }
+
+  // Se algo nao coube, DIGA. Um campo que some sem aviso vira meia hora de
+  // procura no lugar errado -- foi exatamente o que aconteceu aqui.
+  if (n > 0 && n >= (int)sizeof(buf) - 220 && n < (int)sizeof(buf) - 32)
+    n += snprintf(buf + n, sizeof(buf) - n, ",\"trunc\":true");
+
+  if (n > 0 && n < (int)sizeof(buf) - 16)
+    snprintf(buf + n, sizeof(buf) - n, ",\"log\":[]}");
+
+  AsyncWebServerResponse *r = request->beginResponse(200, "application/json", buf);
+  r->addHeader("Access-Control-Allow-Origin", "*");
+  request->send(r);
+}
+
+// Configuracao pelo painel -- nos DOIS lados, com escopos diferentes.
+//
+// Este bloco existia so no transmissor, e o receptor devolvia 404 em
+// /api/config: o painel dele oferecia seletores que nao tinham para onde
+// mandar. So que nem tudo e do transmissor.
+//
+//   taxa e telemetria  -> so o TX. O RX as recebe no pacote de SYNC; mexer
+//                         nelas no receptor seria escrever num valor que a
+//                         proxima sincronizacao sobrescreve.
+//   plano de banda     -> os DOIS. O dominio nao viaja no SYNC, e uma opcao
+//                         local de cada placa. Sem ele aqui, mudar o receptor
+//                         de 433 para 2,4 GHz era impossivel pelo painel.
+//   potencia           -> os DOIS. O receptor tambem transmite: a telemetria
+//                         de volta sai com a potencia dele.
+//
+// Nao expondo: model match, switch mode e binding. Quebram o enlace se erradas,
+// e o lugar delas e a pagina do ExpressLRS em /elrs, com os avisos que ela traz.
+static void HandlePainelConfig(AsyncWebServerRequest *request)
+{
+  bool mudou = false;
+  char msg[160] = "";
+
+  // O painel manda o INDICE do nivel. Antes mandava dBm e o firmware procurava
+  // o nivel mais proximo por baixo numa tabela NOMINAL ({10,14,17,20,...}), que
+  // nao e a deste modulo -- pedir 12 dBm em 2,4 GHz caia num nivel que entrega
+  // 8,4. Com a lista de niveis vindo do firmware, o indice remove a traducao.
+  if (request->hasArg("pwr"))
+  {
+    const int i = request->arg("pwr").toInt();
+    if (i >= (int)MinPower && i <= (int)MaxPower)
+    {
+      config.SetPower((uint8_t)i);
+      mudou = true;
+    }
+    else
+    {
+      request->send(400, "text/plain", "nivel de potencia invalido");
+      return;
+    }
+  }
+
+  if (request->hasArg("power"))
+  {
+    // O painel manda dBm; o config guarda um indice de nivel. Converte pelo
+    // nivel mais proximo POR CIMA -- pedir 12 dBm e receber 10 e melhor que
+    // receber 14 e passar do teto do PA.
+    const int pedido = request->arg("power").toInt();
+    // Tabela dos niveis, espelhando POWERMGNT::getPowerIndBm(). Local porque
+    // o upstream so expoe o dBm do nivel CORRENTE, e aqui e preciso o inverso.
+    static const uint8_t dbmDoNivel[PWR_COUNT] = {10, 14, 17, 20, 24, 27, 30, 33};
+    PowerLevels_e nivel = MinPower;
+    for (int p = (int)MinPower; p <= (int)MaxPower && p < PWR_COUNT; p++)
+    {
+      if (dbmDoNivel[p] <= pedido) nivel = (PowerLevels_e)p;
+    }
+    config.SetPower((uint8_t)nivel);
+    mudou = true;
+    snprintf(msg, sizeof(msg), "potencia -> nivel %d", (int)nivel);
+  }
+
+#if defined(TARGET_TX)
+  if (request->hasArg("tlm"))
+  {
+    // Razao de telemetria: e ela que decide se existe canal de VOLTA.
+    //
+    // Sem telemetria o transmissor nunca sabe o que a outra ponta esta
+    // ouvindo -- RSSI, SNR e LQ ficam sem leitura no painel dele, e nao por
+    // defeito. Quem escolhe e o operador: 1:128 custa quase nada de ar e ja
+    // devolve os numeros; 1:2 devolve rapido e ocupa metade do enlace.
+    const int v = request->arg("tlm").toInt();
+    if (v >= TLM_RATIO_STD && v <= TLM_RATIO_DISARMED)
+    {
+      config.SetTlm((uint8_t)v);
+      mudou = true;
+    }
+    else
+    {
+      request->send(400, "text/plain", "razao de telemetria invalida");
+      return;
+    }
+  }
+
+#endif  // TARGET_TX: telemetria
+
+  // Taxa. Significa coisas diferentes nos dois lados, e as duas gravam:
+  //
+  //   TX -> a taxa em que ele transmite, anunciada no SYNC.
+  //   RX -> a taxa INICIAL de busca. O receptor comeca por ela e insiste
+  //         antes de varrer as outras (rx_main: scanIndex =
+  //         config.GetRateInitialIdx()). E o que faz a banda escolhida no
+  //         painel do receptor valer ja no boot, em vez de depender de sorte
+  //         na varredura.
+  if (request->hasArg("rate"))
+  {
+    const uint8_t idx = (uint8_t)request->arg("rate").toInt();
+    if (isSupportedRFRate(idx))
+    {
+#if defined(TARGET_TX)
+      // No transmissor a troca vale na hora: ele e quem anuncia a taxa no SYNC.
+      config.SetRate(idx);
+      mudou = true;
+#else
+      // No receptor a taxa e o PONTO DE PARTIDA da varredura, e desde que a
+      // varredura ficou presa a banda dessa taxa e ela quem decide onde ele
+      // procura. Gravar sozinho nao bastava: a placa seguia rodando na banda
+      // antiga, o painel continuava reportando a antiga, e o seletor voltava
+      // sozinho ao valor de antes -- parecia que a troca nao pegava.
+      //
+      // Por isso reinicia, igual ao plano de banda. Ao voltar, ela ja procura
+      // onde foi mandada.
+      const bool trocou = config.GetRateInitialIdx() != idx;
+      config.SetRateInitialIdx(idx);
+      mudou = true;
+      if (trocou)
+      {
+        config.Commit();
+        HandlePainelState(request);
+        rebootTime = millis() + 300;
+        return;
+      }
+#endif
+    }
+    else
+    {
+      request->send(400, "text/plain", "taxa nao suportada neste radio");
+      return;
+    }
+  }
+
+
+  // Plano de banda sub-GHz. Vale para as DUAS placas -- a sequencia de saltos
+  // sai do dominio, e trocar so de um lado derruba o enlace.
+  //
+  // Reinicia depois de gravar. O dominio e carregado no boot
+  // (options_LoadFromFlashOrFile) e dele saem a sequencia de FHSS, o canal de
+  // sync e a sintonia do radio. Da para refazer tudo a quente, mas seria
+  // reproduzir a inicializacao inteira num handler HTTP -- e meio caminho
+  // andado e um enlace mudo sao a mesma coisa vista de fora.
+  if (request->hasArg("domain"))
+  {
+    const int d = request->arg("domain").toInt();
+    if (d >= 0 && d < (int)FHSSdomainCount())
+    {
+      // Grava a taxa ANTES de reiniciar. Este bloco sai da funcao pelo return
+      // logo abaixo, entao o config.Commit() la no fim nunca rodaria -- e a
+      // taxa escolhida na mesma requisicao morreria no reset.
+      if (mudou) config.Commit();
+      firmwareOptions.domain = (uint8_t)d;
+      saveOptions();
+      HandlePainelState(request);
+      rebootTime = millis() + 300;
+      return;
+    }
+    request->send(400, "text/plain", "plano de banda invalido");
+    return;
+  }
+
+  if (mudou)
+  {
+    // Grava na NVS: o ajuste tem de sobreviver ao reset, senao o painel vira
+    // controle remoto de uma coisa que esquece.
+    config.Commit();
+  }
+
+  HandlePainelState(request);
+  (void)msg;
+}

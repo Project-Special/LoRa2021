@@ -1,0 +1,38 @@
+  // overlay v3-lr2021: transmissor INDEPENDENTE (simulador de bancada).
+  //
+  // Um TX ExpressLRS nao transmite sozinho: sem CRSF de um handset ele nao tem
+  // dados RC, e o UARTdisconnected() para o hwTimer -- que e quem dispara o
+  // SendRCdataToRF(). O radio inicializa, o LED acende, e ninguem escuta nada.
+  //
+  // O upstream ate preve o caso; o comentario de SendRCdataToRF diz, em letras
+  // dele: "*Do* send data if a packet has never been received from handset and
+  // the timer is running -- this is the case when bench testing and TXing
+  // without a handset". Faltava o "and the timer is running".
+  //
+  // Aqui a bancada precisa de um par que va ao ar sozinho, para medir alcance
+  // sem depender de radio ligado e por perto. Entao: o timer nao para, e os
+  // canais sao gerados aqui.
+  //
+  // Varredura lenta, com periodo proprio por canal. Manche parado numa tela e
+  // indistinguivel de manche congelado por falta de dado -- movimento e o que
+  // prova que o caminho inteiro esta vivo, do ar ate a barra do painel.
+  if (connectionState == noCrossfire)
+  {
+    static uint32_t ultimoGen = 0;
+    if (now - ultimoGen >= 20)   // 50 Hz, a cadencia do enlace
+    {
+      ultimoGen = now;
+      const float t = (float)now;
+      ChannelData[0] = (uint32_t)(992.0f + 700.0f * sinf(t / 1200.0f));
+      ChannelData[1] = (uint32_t)(992.0f + 700.0f * sinf(t / 1900.0f));
+      ChannelData[2] = (uint32_t)(172 + (now / 8) % 1640);
+      ChannelData[3] = 992;
+      // AUX de duas e de tres posicoes, para o painel exercitar as duas faixas.
+      ChannelData[4] = ((now / 2000) & 1) ? 1792 : 191;
+      ChannelData[5] = (now / 1500) % 3 == 0 ? 191 : ((now / 1500) % 3 == 1 ? 992 : 1792);
+      ChannelData[6] = ((now / 3000) & 1) ? 1792 : 191;
+      ChannelData[7] = 992;
+      for (uint8_t i = 8; i < CRSF_NUM_CHANNELS; i++) ChannelData[i] = 992;
+    }
+  }
+
