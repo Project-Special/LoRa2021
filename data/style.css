@@ -65,12 +65,32 @@ html[data-band="2g4"]   { --glow:#4fe3e8; --glow-2:#4fe3e822; --glow-4:#4fe3e844
 
 * { box-sizing: border-box; }
 
+/* O fundo pertence a JANELA, nao ao documento.
+   A luz de cima era dimensionada pela altura do body: numa pagina curta ela
+   cobria tudo, e na aba do banco de dados -- que rola muito -- morria em 60%,
+   deixando o resto num preto chapado que parece pagina inacabada. Com
+   `background-attachment: fixed` a ambiencia acompanha a rolagem.
+   `color-scheme` alinha barra de rolagem e campos nativos ao tema escuro; sem
+   ele o navegador desenha uma barra clara no canto de uma tela preta. */
+html {
+  background: var(--room);
+  color-scheme: dark;
+}
+
 body {
   margin: 0;
+  min-height: 100vh;
   padding: clamp(10px, 2.5vw, 34px);
   background:
+    /* halo superior, tingido pela BANDA em uso -- a mesma cor que o cabecalho
+       e os mostradores usam. Muito fraco de proposito: e ambiencia, nao
+       decoracao, e precisa sumir atras do conteudo. */
+    radial-gradient(120% 46% at 50% -6%, var(--glow-2) 0%, transparent 62%),
     radial-gradient(90% 60% at 50% 0%, #121917 0%, var(--room) 70%),
+    /* base do quadro: impede que o fim da pagina caia num preto chapado */
+    radial-gradient(140% 34% at 50% 104%, #0e1412 0%, var(--room) 68%),
     var(--room);
+  background-attachment: fixed;
   color: var(--ink);
   font-family: var(--mono);
   font-size: var(--t-body);
@@ -825,7 +845,10 @@ input:focus, select:focus {
 
 .db__mapwrap {
   position: relative;
-  height: 300px;
+  /* 300px era altura de miniatura: numa campanha de quilometros o trajeto
+     virava um risco no meio de muito preto. Cresce com a janela, com teto para
+     nao empurrar a tabela de amostras para fora da tela em monitor alto. */
+  height: clamp(300px, 54vh, 640px);
   border: 1px solid var(--rule);
   border-radius: 8px;
   overflow: hidden;
