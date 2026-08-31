@@ -101,7 +101,8 @@ class WebConfig {
   // banda. Deixar o painel morrer sozinho resolve sem exigir disciplina de quem
   // está no campo: se ninguém abriu o painel, ele não era necessário.
   //
-  // Basta UM acesso dentro da janela pra o AP ficar de pé até o próximo reset.
+  // A janela é ROLANTE: enquanto houver alguém conectado ela é reiniciada, e o
+  // AP só cai depois de 2 minutos inteiros sem ninguém.
   static constexpr uint32_t kApGraceMs = 120000;
 
  private:
@@ -135,7 +136,10 @@ class WebConfig {
   IPAddress ip_;
   bool ready_ = false;
   bool apUp_ = false;
-  bool apKeep_ = false;      // alguém entrou: não desliga mais
+  // Ultimo valor visto de httpHits_. Comparar em vez de olhar "> 0" e o que
+  // torna a janela rolante: o que importa e ter chegado requisicao NOVA desde
+  // a ultima verificacao, nao ter chegado alguma vez.
+  uint32_t lastHits_ = 0;
   uint32_t apDeadline_ = 0;
   uint32_t httpHits_ = 0;
 };

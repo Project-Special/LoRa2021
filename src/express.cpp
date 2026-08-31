@@ -215,6 +215,39 @@ static void unpack4x10(const uint8_t* payload, uint16_t* dest) {
   }
 }
 
+/**
+ * Empacota 4 canais de 10 bits em 5 bytes.
+ *
+ * Inverso exato de unpack4x10 acima, que veio do UnpackChannels4x10ToUInt11 do
+ * ExpressLRS (OTA.cpp:306). Os canais entram sem alinhamento de byte: 40 bits
+ * em 5 bytes, zero folga.
+ */
+static void pack4x10(const uint16_t* src, uint8_t* dest) {
+  memset(dest, 0, 5);
+  uint8_t bit = 0;
+  for (uint8_t n = 0; n < 4; n++) {
+    const uint16_t v = src[n] & 0x3FF;
+    for (uint8_t k = 0; k < 10; k++) {
+      if (v & (1u << k)) dest[(bit + k) >> 3] |= 1u << ((bit + k) & 7);
+    }
+    bit += 10;
+  }
+}
+
+void buildRc(uint8_t* out, uint8_t nonce, const uint16_t ch[4], uint8_t switches) {
+  out[0] = 0x00;  // tipo 0 = RCDATA; os 6 bits de crcHigh entram no fim
+  pack4x10(ch, &out[1]);
+  out[6] = switches & 0x7F;
+
+  // A semente do CRC do RCDATA leva o NONCE, e nao so o UID -- e essa a
+  // diferenca em relacao ao SYNC (OTA.cpp:531). Quem recebe nao conhece o
+  // nonce, e por isso decodeRc() o descobre por forca bruta: sao 256 chaves.
+  const uint16_t base = ((static_cast<uint16_t>(uid_[4]) << 8) | uid_[5]) ^ 3;
+  const uint16_t crc = crc14Seeded(out, base ^ nonce);
+  out[0] = static_cast<uint8_t>((crc >> 8) << 2);
+  out[7] = static_cast<uint8_t>(crc & 0xFF);
+}
+
 bool decodeRc(const uint8_t* p, uint8_t len, RcChannels& out) {
   if (len < 8) return false;
   if ((p[0] & 0x03) != 0) return false;  // tipo 0 = RCDATA

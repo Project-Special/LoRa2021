@@ -111,6 +111,18 @@ struct RcChannels {
  * com probabilidade ~1,6% por pacote. Por isso `rcValid()` só passa a valer
  * depois de alguns pacotes coerentes — ver rcCount().
  */
+/**
+ * Monta um RCDATA do ExpressLRS em `out` (8 bytes).
+ *
+ * O simulador so emitia SYNC, e SYNC nao carrega manche nenhum — por isso as
+ * barras do painel ficavam vazias mesmo com o enlace vivo. Um transmissor de
+ * verdade alterna RCDATA e SYNC; aqui o simulador passa a fazer o mesmo, e o
+ * receptor decodifica os dois pelo mesmo caminho.
+ *
+ * `ch` sao 4 canais de 10 bits (0..1023), na ordem A E T R.
+ */
+void buildRc(uint8_t* out, uint8_t nonce, const uint16_t ch[4], uint8_t switches);
+
 bool decodeRc(const uint8_t* p, uint8_t len, RcChannels& out);
 
 /** Último RCDATA válido, e há quanto tempo. */

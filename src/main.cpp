@@ -1010,23 +1010,43 @@ void loop() {
       // do último pacote dele, então desligar o rádio comercial basta.
       nextBeaconAt = now + 500;
     } else if (radio.sniffing()) {
-      // Modo escuta com papel de transmissor = SIMULADOR. Emite SYNC do
-      // ExpressLRS, assinado com o CRC14 do nosso UID, então o receptor o
-      // valida pelo mesmo caminho que valida o transmissor comercial. Assim dá
-      // pra medir alcance sem depender do rádio de terceiro estar ligado e por
-      // perto.
+      // Alterna RCDATA e SYNC, como um transmissor de verdade.
       //
-      // rateIndex 9 = 50 Hz, que é a taxa em que o transmissor de referência
-      // foi encontrado pelo `elrsscan`.
+      // Antes so saia SYNC, e SYNC nao carrega manche nenhum: o enlace ficava
+      // vivo, o LQ em 100%, e as barras do painel vazias. Um transmissor real
+      // manda quase so RCDATA e intercala SYNC de tempos em tempos para o
+      // receptor casar FHSS e nonce; a proporcao de 1 em 8 imita isso.
+      //
+      // Os canais varrem devagar de proposito. Manche parado numa tela e
+      // indistinguivel de manche congelado por falta de dado -- movimento e o
+      // que prova que o caminho inteiro esta vivo, do ar ate a barra.
       uint8_t pkt[8];
-      express::buildSync(pkt, elrsFhssIndex, elrsNonce, 9);
+      const bool mandaSync = (elrsNonce % 8) == 0;
+
+      if (mandaSync) {
+        // rateIndex 9 = 50 Hz, a taxa em que o transmissor de referencia foi
+        // encontrado pelo `elrsscan`.
+        express::buildSync(pkt, elrsFhssIndex, elrsNonce, 9);
+      } else {
+        const uint32_t fase = millis();
+        uint16_t ch[4];
+        // Cada canal com periodo proprio, para dar de olhar as quatro barras e
+        // ver que sao quatro dados diferentes e nao um so replicado.
+        ch[0] = 512 + static_cast<uint16_t>(500.0f * sinf(fase / 1200.0f));
+        ch[1] = 512 + static_cast<uint16_t>(500.0f * sinf(fase / 1900.0f));
+        ch[2] = static_cast<uint16_t>((fase / 8) % 1024);
+        ch[3] = 512;
+        const uint8_t sw = static_cast<uint8_t>((fase / 2000) & 0x7F);
+        express::buildRc(pkt, elrsNonce, ch, sw);
+      }
+
       const int16_t st = radio.sendRaw(pkt, sizeof(pkt));
       if (st == LoraLink::ERR_NONE) {
         txCount++;
         ++elrsNonce;
-        // O índice de FHSS de um transmissor real percorre a tabela; aqui ele
-        // só varia pra o campo não ficar constante. A frequência não salta:
-        // ficamos no canal de sync, que é onde o receptor escuta.
+        // O indice de FHSS de um transmissor real percorre a tabela; aqui ele
+        // so varia pra o campo nao ficar constante. A frequencia nao salta:
+        // ficamos no canal de sync, que e onde o receptor escuta.
         elrsFhssIndex = (elrsFhssIndex + 1) % 80;
       } else {
         Serial.printf("  TX ELRS FALHOU: %s\n", LoraLink::errorName(st));

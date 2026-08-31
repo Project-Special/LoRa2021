@@ -29,10 +29,38 @@ bool WebConfig::begin(LoraLink& radio, const Hooks& hooks) {
   server_.on("/api/send", HTTP_POST, [this] { handleSend_(); });
   server_.on("/api/ping", HTTP_POST, [this] { handlePing_(); });
 
-  server_.serveStatic("/", LittleFS, "/index.html");
-  server_.serveStatic("/index.html", LittleFS, "/index.html");
-  server_.serveStatic("/style.css", LittleFS, "/style.css", "max-age=86400");
-  server_.serveStatic("/app.js", LittleFS, "/app.js", "max-age=86400");
+  // Servir arquivo TAMBEM conta como acesso.
+  //
+  // Antes so `/api/state` incrementava httpHits_, e os arquivos da pagina iam
+  // por serveStatic, que nao passa por handler nenhum. Quem abrisse o painel e
+  // ficasse olhando sem que o polling vingasse -- pagina em cache, JS travado,
+  // aba em segundo plano -- nao contava como acesso, e o AP se desligava
+  // debaixo de um usuario que estava ali.
+  //
+  // A associacao ao AP ja cobria parte disso, mas nao toda: o Android
+  // desassocia sozinho de rede sem internet, e entre duas verificacoes o
+  // contador de estacoes volta a zero.
+  auto arquivo = [this](const char* rota, const char* caminho, const char* cache) {
+    server_.on(rota, HTTP_GET, [this, caminho, cache]() {
+      ++httpHits_;
+      File f = LittleFS.open(caminho, "r");
+      if (!f) {
+        server_.send(404, "text/plain", "nao encontrado");
+        return;
+      }
+      const char* tipo = strstr(caminho, ".css")  ? "text/css"
+                       : strstr(caminho, ".js")   ? "application/javascript"
+                                                  : "text/html";
+      if (cache) server_.sendHeader("Cache-Control", cache);
+      server_.streamFile(f, tipo);
+      f.close();
+    });
+  };
+
+  arquivo("/", "/index.html", nullptr);
+  arquivo("/index.html", "/index.html", nullptr);
+  arquivo("/style.css", "/style.css", "max-age=86400");
+  arquivo("/app.js", "/app.js", "max-age=86400");
 
   server_.onNotFound([this] { server_.send(404, "text/plain", "nao encontrado"); });
   server_.begin();
@@ -51,28 +79,34 @@ void WebConfig::loop() {
 }
 
 void WebConfig::checkApGrace_() {
-  if (!apUp_ || apKeep_) return;
+  if (!apUp_) return;
 
-  // Duas evidências de acesso, e qualquer uma basta. A associação ao AP cobre
-  // quem entrou mas ainda não carregou a página; a contagem de requisições
-  // cobre quem entrou e saiu dentro da janela — associar e desassociar rápido
-  // deixaria o contador de estações em zero de novo.
-  if (WiFi.softAPgetStationNum() > 0 || httpHits_ > 0) {
-    apKeep_ = true;
-    logLine("sys", "painel acessado — WiFi fica no ar ate o proximo reset");
+  // Janela ROLANTE, e nao prazo fixo do boot.
+  //
+  // A regra e: so desliga depois de 2 minutos INTEIROS sem ninguem. Enquanto
+  // houver estacao associada — ou requisicao entrando — o prazo e empurrado
+  // para frente, entao um painel aberto mantem o AP de pe indefinidamente.
+  //
+  // A versao anterior latchava num booleano no primeiro acesso e nunca mais
+  // desligava; e, pior, se o primeiro acesso escapasse entre duas verificacoes
+  // (o Android desassocia sozinho de rede sem internet) o AP caia debaixo de
+  // alguem que estava ali. Contar presenca a cada volta resolve os dois.
+  if (WiFi.softAPgetStationNum() > 0 || httpHits_ != lastHits_) {
+    lastHits_ = httpHits_;
+    apDeadline_ = millis() + kApGraceMs;
     return;
   }
 
   if (static_cast<int32_t>(millis() - apDeadline_) < 0) return;
 
-  // Desliga o rádio inteiro, não só o AP: é o transceptor de 2,4 GHz que
+  // Desliga o radio inteiro, nao so o AP: e o transceptor de 2,4 GHz que
   // atrapalha o LoRa, e um softAPdisconnect sozinho o deixa ligado.
   server_.stop();
   WiFi.softAPdisconnect(true);
   WiFi.mode(WIFI_OFF);
   apUp_ = false;
   Serial.printf(
-      "[web] ninguem acessou o painel em %lu s — WiFi desligado\n",
+      "[web] ninguem conectado por %lu s — WiFi desligado\n",
       static_cast<unsigned long>(kApGraceMs / 1000));
   Serial.println(F("[web] reinicie a placa (comando 'reset') pra ter o painel de volta"));
 }
