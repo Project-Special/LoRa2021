@@ -859,13 +859,17 @@ input:focus, select:focus {
    barra de abas. A alternativa seria a Fullscreen API do navegador, que some
    com a barra do sistema e depende de gesto do usuário — mais atrito para o
    mesmo resultado num painel que já é a página toda. */
+/* Tela cheia com a MESMA moldura do resto da pagina.
+   Colada nas quatro bordas o mapa perdia o enquadramento: em cima sobrava a
+   faixa escura da pagina e embaixo o mapa morria no corte da tela, sem borda
+   nenhuma -- os dois lados nao combinavam. O recuo e o mesmo padding do body,
+   entao a moldura fecha igual dos quatro lados. */
 .db__mapwrap--full {
   position: fixed;
-  inset: 0;
+  inset: clamp(10px, 2.5vw, 34px);
   height: auto;
-  border: none;
-  border-radius: 0;
   z-index: 200;
+  box-shadow: 0 24px 70px -20px #000c;
 }
 
 .db__map { position: absolute; inset: 0; }
@@ -905,9 +909,10 @@ input:focus, select:focus {
 
 /* Em tela cheia o botão vira "voltar" e troca de lado: o canto direito é onde
    o Leaflet põe a atribuição, e o esquerdo é onde a mão procura um voltar. */
+/* O botao fica onde ja estava. Mandado para o canto superior esquerdo, caia
+   por cima dos controles de zoom do Leaflet e do botao Medir. */
 .db__mapwrap--full .db__full {
-  right: auto;
-  left: 10px;
+  right: 10px;
   top: 10px;
 }
 
