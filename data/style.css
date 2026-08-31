@@ -50,6 +50,7 @@
 
   /* escala tipográfica enxuta */
   --t-micro: 10px;   /* rótulos */
+  --t-mini:  11px;   /* densidade: tabela, chips, rotulos de estatistica */
   --t-body:  13px;
   --t-val:   17px;   /* valores de leitura */
   --t-big:   22px;
@@ -75,6 +76,9 @@ html[data-band="2g4"]   { --glow:#4fe3e8; --glow-2:#4fe3e822; --glow-4:#4fe3e844
 html {
   background: var(--room);
   color-scheme: dark;
+  /* reserva a calha: sem isto, travar a rolagem em tela cheia faz a pagina
+     inteira saltar de lado na entrada e na saida */
+  scrollbar-gutter: stable;
 }
 
 body {
@@ -805,10 +809,14 @@ input:focus, select:focus {
    uma tabela de 10 colunas ao lado de uma lista não cabe em tela de notebook
    pequeno, e espremer as duas torna as duas ilegíveis. */
 .db {
+  /* Uma altura so, herdada. O mapa era elastico (300-640), a lista travada em
+     520 e a grade com piso de 520: em notebook sobrava vao morto sob a tabela,
+     em monitor alto sobrava chapa vazia ao lado do mapa. Nenhum dos tres numeros
+     sabia do outro. */
+  --mapH: clamp(300px, 54vh, 640px);
   display: grid;
   grid-template-columns: 260px 1fr;
   gap: 12px;
-  min-height: 520px;
 }
 
 @media (max-width: 900px) {
@@ -821,7 +829,7 @@ input:focus, select:focus {
   margin: 0;
   padding: 0;
   overflow-y: auto;
-  max-height: 520px;
+  max-height: var(--mapH);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -829,28 +837,62 @@ input:focus, select:focus {
 
 .db__item {
   border: 1px solid var(--rule);
-  border-radius: 8px;
+  border-radius: 2px;
   padding: 10px;
-  background: #0000004d;
+  background: #0b0f0e;
+  box-shadow: inset 0 2px 5px #0008;
   cursor: pointer;
 }
 
 .db__item:hover { border-color: #3d4844; }
-.db__item[aria-current="true"] { border-color: var(--glow); box-shadow: 0 0 0 3px var(--glow-2); }
+/* Selecionado e focado usavam o MESMO anel. Agora selecionado e o filete
+   lateral -- a linguagem de "ativo" que o resto do painel ja usa -- e o anel
+   fica reservado ao foco de teclado. */
+.db__item[aria-current="true"] {
+  border-color: var(--glow);
+  background: linear-gradient(180deg, #131a17, #0b0f0e);
+  box-shadow: inset 3px 0 0 var(--glow), inset 0 2px 5px #0008;
+}
+.db__item:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--glow-2); }
+.db__item b {
+  display: block; color: var(--ink);
+  font-size: var(--t-val); font-weight: 600; letter-spacing: .02em;
+}
+.db__item span {
+  display: block; font-size: var(--t-mini);
+  color: var(--ink-far); font-variant-numeric: tabular-nums;
+}
 .db__item[data-empty="1"] { opacity: .45; cursor: not-allowed; }
-.db__item b { display: block; color: var(--ink); }
-.db__item span { display: block; font-size: var(--t-mini); color: var(--ink-far); }
 
 .db__main { display: flex; flex-direction: column; min-width: 0; gap: 12px; }
 
+/* Cantos do Leaflet como COLUNA declarada, nao como pilha de floats.
+   Declarados no nosso CSS de proposito: o leaflet.css vem de CDN, e quando ele
+   nao chega os cantos perdem o position/float e TODOS os controles caem no
+   mesmo ponto -- foi assim que "Medir" apareceu por cima do zoom. Com a coluna,
+   qualquer controle novo se empilha e herda o vao: nao ha coordenada a acertar.
+   `isolation` fecha o contexto de empilhamento no involucro: os z-index 1000 do
+   Leaflet passam a ser internos e param de disputar com a pagina. */
+.leaflet-top, .leaflet-bottom {
+  position: absolute; z-index: 1000; pointer-events: none;
+  display: flex; flex-direction: column; gap: 8px; padding: 10px;
+}
+.leaflet-top    { top: 0; }
+.leaflet-bottom { bottom: 0; }
+.leaflet-left   { left: 0;  align-items: flex-start; }
+.leaflet-right  { right: 0; align-items: flex-end; }
+.leaflet-top .leaflet-control,
+.leaflet-bottom .leaflet-control { float: none; clear: none; margin: 0; }
+
 .db__mapwrap {
   position: relative;
+  isolation: isolate;
   /* 300px era altura de miniatura: numa campanha de quilometros o trajeto
      virava um risco no meio de muito preto. Cresce com a janela, com teto para
      nao empurrar a tabela de amostras para fora da tela em monitor alto. */
-  height: clamp(300px, 54vh, 640px);
+  height: var(--mapH);
   border: 1px solid var(--rule);
-  border-radius: 8px;
+  border-radius: 3px;
   overflow: hidden;
   background: #0d1211;
 }
@@ -859,17 +901,39 @@ input:focus, select:focus {
    barra de abas. A alternativa seria a Fullscreen API do navegador, que some
    com a barra do sistema e depende de gesto do usuário — mais atrito para o
    mesmo resultado num painel que já é a página toda. */
-/* Tela cheia com a MESMA moldura do resto da pagina.
-   Colada nas quatro bordas o mapa perdia o enquadramento: em cima sobrava a
-   faixa escura da pagina e embaixo o mapa morria no corte da tela, sem borda
-   nenhuma -- os dois lados nao combinavam. O recuo e o mesmo padding do body,
-   entao a moldura fecha igual dos quatro lados. */
+/* Tela cheia: o ESTADO mora no <html>, nao no invólucro.
+   Antes era so o wrap virando `fixed`, sem nada atras: pela calha do inset
+   via-se o cabecalho, as abas e a lista de campanhas, e a pagina seguia
+   rolavel por baixo. Lia-se "div flutuando", nao "tela cheia" -- faltava o
+   unico sinal que define modal, uma camada entre o conteudo e o resto.
+   O veu e pseudo do <html> porque o wrap tem overflow:hidden e o recortaria. */
+html.mapfull { overflow: hidden; }
+
+html.mapfull::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 190;                 /* abaixo do mapa (200), acima das abas */
+  /* a MESMA receita de fundo do body: em tela cheia o mapa continua pousado
+     na mesma sala, e nao sobre um preto generico de lightbox */
+  background:
+    radial-gradient(120% 46% at 50% -6%, var(--glow-2) 0%, transparent 62%),
+    radial-gradient(90% 60% at 50% 0%, #121917 0%, var(--room) 70%),
+    var(--room);
+  animation: veu .16s ease-out;
+}
+@keyframes veu { from { opacity: 0; } }
+
+/* O painel entra com transform animado; enquanto ele nao e `none`, o painel
+   vira containing block de position:fixed e o mapa se ancoraria NELE. */
+html.mapfull .panel--db { animation: none; opacity: 1; transform: none; }
+
 .db__mapwrap--full {
   position: fixed;
   inset: clamp(10px, 2.5vw, 34px);
   height: auto;
   z-index: 200;
-  box-shadow: 0 24px 70px -20px #000c;
+  box-shadow: 0 24px 70px -20px #000, 0 0 0 1px #000;
 }
 
 .db__map { position: absolute; inset: 0; }
@@ -879,18 +943,17 @@ input:focus, select:focus {
    (que ocupam os dois cantos de cima). */
 .db__dica {
   position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
-  z-index: 500; margin: 0;
+  z-index: 1001; margin: 0;   /* acima dos cantos do Leaflet, que vao a 1000 */
   background: rgba(19, 127, 236, .92); color: #fff;
   padding: 6px 14px; border-radius: 3px;
   font: 500 12px/1.3 var(--mono); letter-spacing: .03em;
   pointer-events: none; white-space: nowrap;
 }
 
+/* O botao deixa de ser posicionado a mao: virou um L.Control e o CANTO decide
+   onde ele fica. Com coordenada fixa, todo controle novo no mesmo canto passava
+   por baixo dele -- e o Leaflet nem sabia que ele existia. */
 .db__full {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 800;
   appearance: none;
   cursor: pointer;
   font: inherit;
@@ -900,9 +963,10 @@ input:focus, select:focus {
   color: var(--ink);
   background: #0b0f0ee0;
   border: 1px solid var(--rule);
-  border-radius: 6px;
+  border-radius: 2px;
   padding: 8px 12px;
   backdrop-filter: blur(6px);
+  pointer-events: auto;
 }
 
 .db__full:hover { border-color: var(--glow); color: var(--glow); }
@@ -911,22 +975,34 @@ input:focus, select:focus {
    o Leaflet põe a atribuição, e o esquerdo é onde a mão procura um voltar. */
 /* O botao fica onde ja estava. Mandado para o canto superior esquerdo, caia
    por cima dos controles de zoom do Leaflet e do botao Medir. */
-.db__mapwrap--full .db__full {
-  right: 10px;
-  top: 10px;
-}
 
 .db__stats {
+  /* Era a unica <dl> de leitura do projeto sem tratamento de instrumento: seis
+     valores soltos sobre a chapa. `auto-fit` no lugar de seis colunas fixas --
+     em 620px cada celula ficava com 95px e os rotulos quebravam em duas linhas,
+     desalinhando a base dos numeros. O vao de 1px E o filete. */
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  gap: 1px;
   margin: 0;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: var(--rule);
+  overflow: hidden;
 }
-
-.db__stats dt { font-size: var(--t-mini); color: var(--ink-far); text-transform: uppercase; letter-spacing: .08em; }
-.db__stats dd { margin: 2px 0 0; font-size: 18px; font-variant-numeric: tabular-nums; color: var(--ink); }
-.db__stats dd.bad { color: var(--bad); }
-.db__stats dd.warn { color: var(--glow); }
+.db__stats > div { padding: 9px 11px; background: #0b0f0e; box-shadow: inset 0 2px 5px #0008; }
+.db__stats dt {
+  font-size: var(--t-micro); letter-spacing: .14em;
+  text-transform: uppercase; color: var(--ink-far);
+}
+.db__stats dd {
+  margin: 3px 0 0; font-size: var(--t-big); font-weight: 600;
+  font-variant-numeric: tabular-nums; color: var(--ink);
+}
+.db__stats dd.bad  { color: var(--bad); }
+/* era var(--glow): o acento e a banda, atencao e --warn. Duas coisas na mesma
+   palavra faziam "melhor RSSI" brilhar igual a um alerta. */
+.db__stats dd.warn { color: var(--warn); }
 
 /* A tabela rola dentro da própria caixa: sem isto, dez colunas empurram a
    página inteira para o lado e o chassi do painel sai do lugar. */
@@ -934,7 +1010,7 @@ input:focus, select:focus {
   overflow: auto;
   max-height: 340px;
   border: 1px solid var(--rule);
-  border-radius: 8px;
+  border-radius: 2px;
 }
 
 .db__table { width: 100%; border-collapse: collapse; font-size: var(--t-mini); font-variant-numeric: tabular-nums; }
@@ -956,25 +1032,26 @@ input:focus, select:focus {
 
 /* Apagar é destrutivo e sem desfazer: fica discreto até o ponteiro chegar
    perto, para não competir com o clique que abre a campanha. */
+/* Era o UNICO texto sublinhado do painel -- lia-se como link de erro -- e
+   ocupava linha propria em toda campanha. Vira acao discreta: aparece quando
+   procurada, e so fica vermelha na hora de agir. */
 .db__del {
-  appearance: none;
-  cursor: pointer;
-  margin-top: 8px;
-  padding: 0;
-  background: none;
-  border: none;
-  font: inherit;
-  font-size: var(--t-mini);
-  color: var(--ink-far);
-  text-decoration: underline;
+  appearance: none; cursor: pointer; font: inherit;
+  margin-top: 8px; padding: 2px 7px;
+  background: none; border: 1px solid transparent; border-radius: 2px;
+  font-size: var(--t-micro); letter-spacing: .12em; text-transform: uppercase;
+  color: transparent;
+  transition: color .14s, border-color .14s;
 }
+.db__item:hover .db__del,
+.db__item:focus-within .db__del { color: var(--ink-far); border-color: var(--rule); }
+.db__del:hover { color: var(--bad); border-color: var(--bad); }
 
-.db__item:hover .db__del { color: var(--bad); }
 
 /* Formulário de credenciais: aparece no lugar da lista até haver conexão. */
 .db__auth {
   border: 1px solid var(--rule);
-  border-radius: 8px;
+  border-radius: 3px;
   padding: 16px;
   background: #0000004d;
   margin-bottom: 12px;
@@ -987,7 +1064,9 @@ input:focus, select:focus {
 /* Portado de tools/serial: rótulo micro espaçado, valor com brilho e trilho
    afundado com preenchimento em gradiente. Mesma linguagem nas duas telas do
    projeto — quem já leu uma reconhece a outra sem reaprender. */
-.gauge { grid-column: 1 / -1; }
+/* .gauge nao force coluna: dentro de .gauges o auto-fit ja decide, e o
+   `grid-column: 1 / -1` fazia cada mostrador ocupar a largura inteira --
+   empilhados sempre, nunca lado a lado como a propria regra prometia. */
 
 .gauge__lb {
   font-size: var(--t-micro);
@@ -1153,7 +1232,7 @@ input:focus, select:focus {
    Tres faixas de cor para baixo/meio/alto, mais um trilho vertical com
    preenchimento proporcional — assim uma chave de 6 posicoes tambem se
    distingue, parando em alturas diferentes dentro da mesma faixa. */
-.sw {
+.swx {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -1167,7 +1246,7 @@ input:focus, select:focus {
   background: #0000004d;
 }
 
-.sw b { font-weight: 500; }
+.swx b { font-weight: 500; }
 
 .sw__track {
   position: relative;
@@ -1203,9 +1282,9 @@ input:focus, select:focus {
 
 .sw__v { font-style: normal; font-size: 11px; opacity: .8; min-width: 9px; }
 
-.sw[data-pos="0"] { color: var(--ink-far); }
-.sw[data-pos="1"] { color: #ffab3d; border-color: #ffab3d66; }
-.sw[data-pos="2"] {
+.swx[data-pos="0"] { color: var(--ink-far); }
+.swx[data-pos="1"] { color: #ffab3d; border-color: #ffab3d66; }
+.swx[data-pos="2"] {
   color: var(--glow);
   border-color: var(--glow);
   box-shadow: 0 0 12px var(--glow-2);

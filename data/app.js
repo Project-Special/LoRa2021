@@ -1142,8 +1142,19 @@ function rssiColor(v) {
   return `hsl(${Math.round(k * 120)}, 85%, 45%)`;
 }
 
-const TRAIL_OK = '#34C759';
-const TRAIL_DOWN = '#FF3B30';
+/* Cores do mapa lidas da PALETA, nao fixas.
+   O painel inteiro raciona o acento em torno de --glow, que muda com a banda.
+   O mapa -- a maior area da aba -- estava em #137fec (azul Material) em nove
+   lugares, mais as cores de sistema do iOS no rastro. Em 915 o painel ficava
+   laranja e o mapa azul: parecia widget de terceiro embutido. Pior, o vermelho
+   do iOS e vizinho do acento de 915, e o "sem enlace" deixava de gritar. */
+const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const ACENTO = () => cssVar('--glow') || '#6cf0a0';
+const TRAIL_OK = () => cssVar('--glow') || '#6cf0a0';
+const TRAIL_DOWN = () => cssVar('--bad') || '#ff4f70';
+/* Aneis e regua sao REFERENCIA, nao leitura: ficam em cinza de instrumento
+   para nao competir com o rastro, que e o dado. */
+const REGUA = '#9aaaa3';
 
 /** Carrega o Leaflet so quando a aba abre: na placa ele nunca seria baixado. */
 function loadLeaflet() {
@@ -1188,6 +1199,10 @@ function renderDbList() {
   for (const r of DB.list) {
     const li = document.createElement('li');
     li.className = 'db__item';
+    // Era um <li> com onclick: sem tabindex, sem role, invisivel ao teclado --
+    // e a aba inteira depende dele para abrir qualquer coisa.
+    li.tabIndex = 0;
+    li.setAttribute('role', 'button');
     li.dataset.id = r.id;
     if (!r.samples) li.dataset.empty = '1';
 
@@ -1213,7 +1228,14 @@ function renderDbList() {
 
     li.append(b, d, p, del);
 
-    if (r.samples) li.addEventListener('click', () => dbOpen(r));
+    if (r.samples) {
+      const abrir = () => dbOpen(r);
+      li.addEventListener('click', abrir);
+      // role="button" sem teclado e so aparencia de acessivel.
+      li.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); abrir(); }
+      });
+    }
     box.appendChild(li);
   }
 }
@@ -1393,6 +1415,20 @@ async function renderDbMap() {
     // Barra de escala: da a ordem de grandeza sem exigir clique nenhum.
     L.control.scale({ metric: true, imperial: false, maxWidth: 160 }).addTo(DB.map);
     montarRegua(DB.map);
+
+    // O botao de tela cheia entra como CONTROLE do Leaflet, e nao como div
+    // absoluto: quem decide a posicao passa a ser o canto, entao um controle
+    // novo se empilha em vez de sobrepor.
+    const Cheia = L.Control.extend({
+      options: { position: 'topright' },
+      onAdd() {
+        const b = $('dbFull');
+        b.classList.add('leaflet-control');
+        L.DomEvent.disableClickPropagation(b);
+        return b;
+      },
+    });
+    DB.map.addControl(new Cheia());
   }
   DB.layer.clearLayers();
   DB.map.invalidateSize();
@@ -1404,13 +1440,13 @@ async function renderDbMap() {
   const hasOrigin = o && o.origin_lat != null && o.origin_lon != null;
   if (hasOrigin) {
     L.circleMarker([o.origin_lat, o.origin_lon], {
-      radius: 9, color: '#ffffff', weight: 2, fillColor: '#137fec', fillOpacity: 1,
+      radius: 9, color: '#ffffff', weight: 2, fillColor: ACENTO(), fillOpacity: 1,
     }).bindPopup('<b>Transmissor</b>').addTo(DB.layer);
 
     // Aneis de referencia: dao escala ao mapa sem precisar medir nada.
     for (const rad of [250, 500, 1000, 2000]) {
       L.circle([o.origin_lat, o.origin_lon], {
-        radius: rad, color: '#137fec', weight: 1, opacity: .35, fill: false, dashArray: '4 6',
+        radius: rad, color: REGUA, weight: 1, opacity: .35, fill: false, dashArray: '4 6',
       }).addTo(DB.layer);
     }
   }
@@ -1423,7 +1459,7 @@ async function renderDbMap() {
   const flush = () => {
     if (run.length > 1 && runOk !== null) {
       L.polyline(run, {
-        color: runOk ? TRAIL_OK : TRAIL_DOWN,
+        color: runOk ? TRAIL_OK() : TRAIL_DOWN(),
         weight: 4,
         opacity: .85,
         dashArray: runOk ? undefined : '6 6',
@@ -1446,7 +1482,7 @@ async function renderDbMap() {
   for (const r of rows) {
     L.circleMarker([r.latitude, r.longitude], {
       radius: 5,
-      color: r.linked ? TRAIL_OK : TRAIL_DOWN,
+      color: r.linked ? TRAIL_OK() : TRAIL_DOWN(),
       weight: 2,
       fillColor: rssiColor(r.rssi_dbm),
       fillOpacity: .9,
@@ -1456,7 +1492,7 @@ async function renderDbMap() {
         `SNR ${r.snr_db == null ? '—' : r.snr_db} dB<br>` +
         `dist ${fmtDist(r.distance_m)}<br>` +
         `${new Date(r.t).toLocaleTimeString('pt-BR')}` +
-        (r.linked ? '' : '<br><b style="color:#FF3B30">sem enlace</b>'),
+        (r.linked ? '' : `<br><b style="color:${TRAIL_DOWN()}">sem enlace</b>`),
       )
       .addTo(DB.layer);
   }
@@ -1482,7 +1518,7 @@ function montarRegua(map) {
   const etiquetaEm = (ll, texto, forte) => L.marker(ll, {
     icon: L.divIcon({
       className: '',
-      html: `<b style="background:${forte ? '#137fec' : 'rgba(19,127,236,.75)'};color:#fff;` +
+      html: `<b style="background:${forte ? ACENTO() : REGUA};color:#0b0f0e;` +
             `padding:3px 8px;border-radius:3px;font:600 12px/1 system-ui;` +
             `white-space:nowrap">${texto}</b>`,
       iconAnchor: [-10, 8],
@@ -1523,8 +1559,8 @@ function montarRegua(map) {
         ativa = true;
         a = null;
         camada.clearLayers();
-        botao.style.background = '#137fec';
-        botao.style.color = '#fff';
+        botao.style.background = ACENTO();
+        botao.style.color = '#0b0f0e';
         map.getContainer().style.cursor = 'crosshair';
         dica('Clique no primeiro ponto');
       });
@@ -1540,7 +1576,7 @@ function montarRegua(map) {
     const m = map.distance(a, ev.latlng);
     if (linhaViva) linhaViva.setLatLngs([a, ev.latlng]);
     else linhaViva = L.polyline([a, ev.latlng], {
-      color: '#137fec', weight: 2, opacity: .7, dashArray: '6 6',
+      color: REGUA, weight: 2, opacity: .7, dashArray: '6 6',
     }).addTo(camada);
     if (etiqueta) camada.removeLayer(etiqueta);
     etiqueta = etiquetaEm(ev.latlng, fmtDist(m), false).addTo(camada);
@@ -1554,10 +1590,10 @@ function montarRegua(map) {
       const m = map.distance(a, ev.latlng);
       camada.clearLayers();
       linhaViva = etiqueta = null;
-      L.polyline([a, ev.latlng], { color: '#137fec', weight: 3 }).addTo(camada);
+      L.polyline([a, ev.latlng], { color: ACENTO(), weight: 3 }).addTo(camada);
       for (const ll of [a, ev.latlng]) {
         L.circleMarker(ll, {
-          radius: 5, color: '#fff', weight: 2, fillColor: '#137fec', fillOpacity: 1,
+          radius: 5, color: '#fff', weight: 2, fillColor: ACENTO(), fillOpacity: 1,
         }).addTo(camada);
       }
       etiquetaEm(ev.latlng, fmtDist(m), true).addTo(camada);
@@ -1568,7 +1604,7 @@ function montarRegua(map) {
       linhaViva = etiqueta = null;
       a = ev.latlng;
       L.circleMarker(a, {
-        radius: 5, color: '#fff', weight: 2, fillColor: '#137fec', fillOpacity: 1,
+        radius: 5, color: '#fff', weight: 2, fillColor: ACENTO(), fillOpacity: 1,
       }).addTo(camada);
       dica('Clique no segundo ponto');
     }
@@ -1659,7 +1695,7 @@ function setMapFull(on) {
 
   // Trava a rolagem do fundo: sem isso o gesto de arrastar o mapa rolava a
   // página junto, e o mapa "escapava" enquanto se tentava mover nele.
-  document.body.style.overflow = on ? 'hidden' : '';
+  document.documentElement.classList.toggle('mapfull', on);
 
   // invalidateSize é obrigatório: o Leaflet mede o container quando ele muda de
   // tamanho, não sozinho. Sem isto metade do mapa fica cinza, com tiles só na
@@ -1801,7 +1837,7 @@ function buildSticks() {
   sw.innerHTML = '';
   for (let i = 0; i < 8; i++) {
     const b = document.createElement('span');
-    b.className = 'sw';
+    b.className = 'swx';   // .sw e o interruptor da bancada; ver style.css
     b.id = 'sw' + i;
 
     const lb = document.createElement('b');
