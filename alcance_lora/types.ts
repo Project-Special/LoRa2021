@@ -79,6 +79,15 @@ export interface RadioState {
   lq?: number;
   linked: boolean;
   radioOk: boolean;
+  /** Indice da taxa em uso. So chega pelo painel (WiFi); o CRSF nao o carrega. */
+  rate?: number;
+  /** Taxas que o firmware aceita, com a banda de cada uma. */
+  rates?: Array<{ i: number; hz: number; b: string; c8?: number }>;
+  /** Plano de banda sub-GHz em uso, e os que o firmware conhece. */
+  domain?: number;
+  domains?: Array<{ i: number; nome: string; mhz: number; ch: number; ok?: boolean }>;
+  /** Niveis de potencia com o dBm MEDIDO de cada um (datasheet do modulo). */
+  powers?: Array<{ i: number; dbm: number }>;
 }
 
 export type ConnectionState = 'idle' | 'connecting' | 'online' | 'error';

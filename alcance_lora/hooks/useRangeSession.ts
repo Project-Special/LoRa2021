@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ConnectionState, RadioState, RangeSample, Session, TxOrigin } from '../types';
+import type { Fonte } from '../services/RadioService';
 import { radioService } from '../services/RadioService';
 import { SessionStore } from '../services/SessionStore';
 import { Fix, GeoWatcher, ensurePermission, watch as watchGeo } from '../services/GeoService';
@@ -81,6 +82,15 @@ interface UseRangeSession {
   loadSession: (s: Session) => void;
   sendCommand: (cmd: string) => Promise<void>;
   transport: string;
+  /** Cabo ou WiFi do receptor. */
+  fonte: Fonte;
+  setFonte: (f: Fonte) => Promise<void>;
+  /** Troca a taxa (e a banda). So funciona pelo WiFi. */
+  setRate: (i: number) => Promise<void>;
+  /** Troca o nivel de potencia. So funciona pelo WiFi. */
+  setPower: (i: number) => Promise<void>;
+  /** Troca o plano de banda sub-GHz. Reinicia a placa. */
+  setDomain: (i: number) => Promise<void>;
 }
 
 export function useRangeSession(): UseRangeSession {
@@ -344,7 +354,8 @@ export function useRangeSession(): UseRangeSession {
       // Avisa, mas segue: o trajeto continua sendo gravado, com RSSI vazio.
       setConnection('error');
       setSerialConnected(false);
-      setError(`Serial: ${e instanceof Error ? e.message : 'falha ao abrir'}`);
+      const onde = radioService.getFonte() === 'wifi' ? 'WiFi' : 'Serial';
+      setError(`${onde}: ${e instanceof Error ? e.message : 'falha ao abrir'}`);
     }
 
     // O timer vira REDE DE SEGURANÇA, não a fonte.
@@ -507,6 +518,78 @@ export function useRangeSession(): UseRangeSession {
    * O GPS já reatava sozinho a cada 3 s. Não havia motivo para a serial ser
    * tratada como falha definitiva, e sim para ser tratada igual.
    */
+  // De onde vem a telemetria. Nao ha deteccao automatica de proposito: as duas
+  // fontes falam com a MESMA placa, e adivinhar qual o operador quis ficaria
+  // trocando de caminho sozinho no meio de uma campanha.
+  const [fonte, setFonteEstado] = useState<Fonte>(radioService.getFonte());
+
+  const setRate = useCallback(async (i: number) => {
+    try {
+      await radioService.setRate(i);
+    } catch (e) {
+      setError(`Taxa: ${e instanceof Error ? e.message : 'falha'}`);
+    }
+  }, []);
+
+  const setDomain = useCallback(async (i: number) => {
+    try {
+      await radioService.setDomain(i);
+    } catch (e) {
+      setError(`Plano: ${e instanceof Error ? e.message : 'falha'}`);
+    }
+  }, []);
+
+  const setPower = useCallback(async (i: number) => {
+    try {
+      await radioService.setPower(i);
+    } catch (e) {
+      setError(`Potencia: ${e instanceof Error ? e.message : 'falha'}`);
+    }
+  }, []);
+
+  const setFonte = useCallback(async (f: Fonte) => {
+    await radioService.setFonte(f);
+    setFonteEstado(f);
+    setSerialConnected(false);
+    setTransport(radioService.transportName());
+    setLive(null);
+    Diag.info(f === 'wifi' ? 'fonte: WiFi do receptor' : 'fonte: cabo USB');
+  }, []);
+
+  // Tela acesa enquanto grava.
+  //
+  // Nao e conforto de leitura: em aparelhos Samsung o bloqueio de tela dispara
+  // o UsbHostRestrictor, que CORTA o modo host do USB. A serial morre com a
+  // placa ligada e o cabo no lugar -- foi o que os logs do aparelho mostraram,
+  // `enterRestriction: Screen Lock On` seguido de `USB HOST UEVENT STATE=REMOVE`
+  // e da falha de leitura. Numa campanha de alcance isso e perder a medida no
+  // meio do caminho.
+  useEffect(() => {
+    let vivo = true;
+    void (async () => {
+      try {
+        const { UsbSerial } = await import('../plugins/UsbSerial');
+        if (vivo) await UsbSerial.manterTelaAtiva({ on: recording });
+      } catch {
+        // Navegador, ou plugin ausente: segue sem segurar a tela.
+      }
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [recording]);
+
+  // A serial pode cair sozinha -- cabo removido, ou o host USB cortado pelo
+  // bloqueio de tela do aparelho. Sem escutar isso o app seguia se achando
+  // conectado, e o laco de reconexao abaixo (que so roda com a serial ausente)
+  // nunca disparava: ficava morto ate alguem reiniciar a campanha.
+  useEffect(() => {
+    return radioService.onFailure(() => {
+      setSerialConnected(false);
+      setLive(null);
+    });
+  }, []);
+
   useEffect(() => {
     if (!recording || serialConnected) return;
     let alive = true;
@@ -667,6 +750,11 @@ export function useRangeSession(): UseRangeSession {
     sendCommand,
     transport,
     serialConnected,
+    fonte,
+    setFonte,
+    setRate,
+    setPower,
+    setDomain,
     telemetryAgeMs: lastTelemetryAt ? Date.now() - lastTelemetryAt : Infinity,
   };
 }

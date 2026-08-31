@@ -41,6 +41,11 @@ const App: React.FC = () => {
           serialConnected={s.serialConnected}
           telemetryAgeMs={s.telemetryAgeMs}
           transport={s.transport}
+          fonte={s.fonte}
+          onSetFonte={s.setFonte}
+          onSetRate={s.setRate}
+          onSetPower={s.setPower}
+          onSetDomain={s.setDomain}
           cloud={s.cloud}
           cloudMessage={s.cloudMessage}
           onSyncNow={s.syncNow}

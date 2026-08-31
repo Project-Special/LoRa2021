@@ -1,5 +1,6 @@
 import { RadioState } from '../types';
 import { Diag } from './Diag';
+import { CrsfDecoder, setBandaCrsf } from '../lib/crsf';
 
 /**
  * Lê o rádio pela SERIAL USB da placa.
@@ -38,8 +39,23 @@ export interface SerialTransport {
   isAvailable(): boolean;
   open(): Promise<void>;
   close(): Promise<void>;
-  /** Chamado a cada linha completa recebida. */
+  /** Chamado a cada linha completa recebida (dialeto de texto da bancada). */
   onLine(cb: (line: string) => void): void;
+  /**
+   * Chamado com os bytes CRUS, sem decodificacao.
+   *
+   * O receptor ExpressLRS fala CRSF binario. Passar esses bytes por um
+   * TextDecoder os destroi -- toda sequencia invalida vira U+FFFD -- e foi
+   * exatamente por isso que o app lia o cabo inteiro e continuava dizendo "sem
+   * enlace". O caminho de texto continua existindo para a bancada.
+   */
+  onBytes(cb: (b: Uint8Array) => void): void;
+  /**
+   * Chamado quando a leitura morre -- cabo removido, host cortado pelo
+   * bloqueio de tela. Sem isto o app continuava se achando conectado e o laco
+   * de reconexao, que so roda com serialConnected false, nunca disparava.
+   */
+  onError(cb: (motivo: string) => void): void;
   write(text: string): Promise<void>;
 }
 
@@ -66,6 +82,8 @@ class WebSerialTransport implements SerialTransport {
   private port: SerialPort | null = null;
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   private cb: ((line: string) => void) | null = null;
+  private cbBytes: ((b: Uint8Array) => void) | null = null;
+  private cbErro: ((m: string) => void) | null = null;
   private closing = false;
 
   isAvailable() {
@@ -89,11 +107,17 @@ class WebSerialTransport implements SerialTransport {
       while (!this.closing) {
         const { value, done } = await this.reader.read();
         if (done) break;
-        if (value) splitter.push(dec.decode(value, { stream: true }));
+        if (value) {
+          this.cbBytes?.(value);
+          splitter.push(dec.decode(value, { stream: true }));
+        }
       }
+    } catch (e) {
+      this.cbErro?.(e instanceof Error ? e.message : 'leitura interrompida');
     } finally {
-      this.reader.releaseLock();
+      this.reader?.releaseLock();
       this.reader = null;
+      if (!this.closing) this.cbErro?.('fluxo encerrado');
     }
   }
 
@@ -110,6 +134,14 @@ class WebSerialTransport implements SerialTransport {
 
   onLine(cb: (line: string) => void) {
     this.cb = cb;
+  }
+
+  onBytes(cb: (b: Uint8Array) => void) {
+    this.cbBytes = cb;
+  }
+
+  onError(cb: (motivo: string) => void) {
+    this.cbErro = cb;
   }
 
   async write(text: string) {
@@ -136,6 +168,8 @@ class NativeSerialTransport implements SerialTransport {
     return this.label;
   }
   private cb: ((line: string) => void) | null = null;
+  private cbBytes: ((b: Uint8Array) => void) | null = null;
+  private cbErro: ((m: string) => void) | null = null;
   private handles: Array<{ remove: () => Promise<void> }> = [];
 
   isAvailable() {
@@ -168,12 +202,20 @@ class NativeSerialTransport implements SerialTransport {
     const splitter = new LineSplitter((l) => this.cb?.(l));
     this.handles.push(
       await UsbSerial.addListener('serialData', (ev) => {
-        if (ev?.data) splitter.push(ev.data);
+        if (!ev?.data) return;
+        // Chega em Base64 porque a ponte Java->JS nao transporta bytes crus e
+        // decodificar como UTF-8 destruiria os quadros CRSF do ExpressLRS.
+        const bruto = atob(ev.data);
+        const bytes = new Uint8Array(bruto.length);
+        for (let i = 0; i < bruto.length; i++) bytes[i] = bruto.charCodeAt(i);
+        this.cbBytes?.(bytes);
+        splitter.push(bruto);
       }),
     );
     this.handles.push(
       await UsbSerial.addListener('serialError', (ev) => {
         Diag.error(`leitura: ${ev?.error}`);
+        this.cbErro?.(ev?.error ?? 'leitura interrompida');
       }),
     );
 
@@ -191,6 +233,14 @@ class NativeSerialTransport implements SerialTransport {
 
   onLine(cb: (line: string) => void) {
     this.cb = cb;
+  }
+
+  onBytes(cb: (b: Uint8Array) => void) {
+    this.cbBytes = cb;
+  }
+
+  onError(cb: (motivo: string) => void) {
+    this.cbErro = cb;
   }
 
   async write(text: string) {
@@ -268,10 +318,31 @@ export function parseTelemetry(line: string): RadioState | null {
   };
 }
 
+/**
+ * De onde vem a telemetria.
+ *
+ * 'usb' e o cabo -- medida direta, sem nada no ar entre o receptor e o
+ * celular. 'wifi' fala com o painel do proprio receptor em 192.168.4.1, e
+ * existe porque o cabo tem um problema que nao e nosso: o aparelho corta o modo
+ * host do USB quando a tela bloqueia (ver manterTelaAtiva).
+ *
+ * O WiFi tem um custo que o cabo nao tem, e ele precisa estar dito em algum
+ * lugar: o AP do receptor transmite em 2,4 GHz, a MESMA banda do enlace
+ * ExpressLRS que se esta medindo. Nao e neutro numa campanha de alcance.
+ */
+export type Fonte = 'usb' | 'wifi';
+
+const URL_PAINEL = 'http://192.168.4.1/api/state';
+
 export class RadioService {
   private transport: SerialTransport | null = null;
   private latest: RadioState | null = null;
   private listeners: Array<(s: RadioState) => void> = [];
+  private abertura: Promise<void> | null = null;
+  private falhas: Array<(motivo: string) => void> = [];
+  private fonte: Fonte = 'usb';
+  private enquete: number | null = null;
+  private wifiOk = false;
 
   /** Escolhe o transporte que existir neste ambiente. */
   pickTransport(): SerialTransport {
@@ -280,19 +351,105 @@ export class RadioService {
     return new WebSerialTransport();
   }
 
+  getFonte(): Fonte {
+    return this.fonte;
+  }
+
+  /** Troca a fonte. Se havia conexao, ela e encerrada -- sao caminhos distintos. */
+  async setFonte(f: Fonte): Promise<void> {
+    if (f === this.fonte) return;
+    await this.disconnect().catch(() => undefined);
+    this.fonte = f;
+  }
+
   isConnected() {
-    return this.transport !== null;
+    return this.transport !== null || this.wifiOk;
   }
 
   transportName() {
+    if (this.fonte === 'wifi') return this.wifiOk ? 'WiFi · 192.168.4.1' : '—';
     return this.transport?.name ?? '—';
   }
 
+  /**
+   * Abertura UNICA, mesmo com dois pedidos simultaneos.
+   *
+   * O guarda era so `if (this.transport) return`, e ele nao servia: transport
+   * so e atribuido DEPOIS do await de open(). Duas chamadas concorrentes --
+   * a deteccao de USB ocioso e a reconexao -- passavam as duas pelo guarda e
+   * abriam a mesma porta duas vezes. O log do celular mostrava o sintoma:
+   *
+   *     porta aberta a 420000 baud (CdcAcmSerialDriver)
+   *     porta aberta a 420000 baud (CdcAcmSerialDriver)
+   *     leitura: Queueing USB request failed
+   *
+   * A segunda abertura reivindica a mesma interface e derruba a leitura da
+   * primeira. Era exatamente o "reconhece por algum tempo e para".
+   */
   async connect(): Promise<void> {
     if (this.transport) return;
+    if (this.abertura) return this.abertura;
+    this.abertura = this.abrir();
+    try {
+      await this.abertura;
+    } finally {
+      this.abertura = null;
+    }
+  }
+
+  private async abrir(): Promise<void> {
+    if (this.fonte === 'wifi') return this.abrirWifi();
     const t = this.pickTransport();
     let first = true;
+
+    // Duas placas, dois dialetos. A bancada fala texto (`$T ...`); o receptor
+    // ExpressLRS fala CRSF binario. O app entende os dois e deixa a PLACA
+    // decidir -- assim o mesmo cabo e o mesmo baud servem para as duas, que era
+    // o ponto de ter unificado 420000 em todo o projeto.
+    let viuCrsf = false;
+    const crsf = new CrsfDecoder((l) => {
+      if (!viuCrsf) {
+        viuCrsf = true;
+        Diag.info('receptor ExpressLRS reconhecido (CRSF)');
+      }
+      const st: RadioState = {
+        node: 'ELRS',
+        band: l.banda ?? '2g4',
+        freq: l.banda === '2g4' ? 2441.4 : 0,
+        sf: l.sf ?? 0,
+        bw: l.bw ?? 0,
+        cr: l.cr ?? 0,
+        power: l.power ?? 0,
+        rssi: l.rssi,
+        snr: l.snr,
+        lq: l.lq,
+        linked: l.linked,
+        radioOk: true,
+      };
+      if (first && l.linked) {
+        Diag.info(`telemetria OK — ELRS ${st.rssi} dBm`);
+        first = false;
+      }
+      this.latest = st;
+      this.listeners.forEach((f) => f(st));
+    });
+    t.onBytes((b) => crsf.push(b));
+
+    // Leitura morta = conexao morta. Derrubar o transporte aqui e o que permite
+    // ao laco de reconexao voltar a tentar: ele so roda com a serial marcada
+    // como ausente, e antes o app ficava se achando conectado para sempre.
+    t.onError((motivo) => {
+      if (this.transport !== t) return;
+      this.transport = null;
+      this.latest = null;
+      Diag.warn(`serial caiu: ${motivo}`);
+      this.falhas.forEach((f) => f(motivo));
+    });
+
     t.onLine((line) => {
+      // Com CRSF confirmado o caminho de texto se cala: os bytes binarios
+      // contem 0x0A, e cada um deles viraria uma "linha" de lixo no console.
+      if (viuCrsf) return;
       const st = parseTelemetry(line);
       if (!st) {
         // Tudo que nao e telemetria vai para o console do app: e a resposta de
@@ -318,18 +475,161 @@ export class RadioService {
     // ele vira canal de dados, e a 420000 cada linha de texto custa ~2 ms — o
     // resumo periodico e o log por quadro competiam com a propria telemetria.
     // Em quiet a placa emite so `$T`, e a 1 Hz em vez de 0,2 Hz.
+    //
+    // So vale para a bancada. O receptor ExpressLRS nao tem console de texto: a
+    // entrada serial dele espera CRSF de um controlador de voo, e despejar
+    // comandos ali e injetar lixo num parser que nao os pediu. Por isso espera
+    // um instante para ver qual dialeto a placa fala antes de escrever.
+    await new Promise((r) => setTimeout(r, 400));
+    if (viuCrsf) return;
     await t.write('quiet on\n');
     // Uma leitura ja, para a tela nao ficar vazia ate o primeiro periodico.
     await t.write('tel\n');
   }
 
   async disconnect(): Promise<void> {
+    if (this.enquete !== null) {
+      clearInterval(this.enquete);
+      this.enquete = null;
+    }
+    this.wifiOk = false;
     if (!this.transport) return;
     // Devolve o console à placa: quem for plugar o monitor depois espera achar
     // o firmware falando, não mudo.
-    await this.transport.write('quiet off\n').catch(() => undefined);
+    // Idem: nao escreve nada num receptor ExpressLRS, que nao tem console.
+    if (this.latest?.node !== 'ELRS') {
+      await this.transport.write('quiet off\n').catch(() => undefined);
+    }
     await this.transport.close();
     this.transport = null;
+  }
+
+  /**
+   * Telemetria pelo painel do receptor, em vez do cabo.
+   *
+   * Nao ha protocolo novo: o painel ja publica /api/state no MESMO formato que
+   * o app consome do firmware de bancada -- node, band, freq, sf, bw, cr,
+   * power, rssi, snr, lq, linked, radioOk. Foi construido assim, e e por isso
+   * que este caminho custa uma enquete e um mapeamento, e nao um decodificador.
+   *
+   * Uma leitura vale como prova de conexao antes de declarar a fonte aberta:
+   * associar ao AP nao garante que o painel responda, e um "conectado" que nao
+   * traz numero e pior que um erro honesto.
+   */
+  private async abrirWifi(): Promise<void> {
+    const primeira = await this.lerPainel();
+    this.aplicar(primeira);
+    this.wifiOk = true;
+    Diag.info('painel do receptor respondendo em 192.168.4.1');
+
+    let seguidas = 0;
+    this.enquete = window.setInterval(async () => {
+      try {
+        this.aplicar(await this.lerPainel());
+        seguidas = 0;
+      } catch (e) {
+        seguidas++;
+        // Uma falha isolada e normal com WiFi; tres seguidas sao uma queda.
+        // Derrubar na primeira faria o LED piscar vermelho a toa.
+        if (seguidas < 3) return;
+        const motivo = e instanceof Error ? e.message : 'painel mudo';
+        void this.disconnect().catch(() => undefined);
+        Diag.warn(`WiFi caiu: ${motivo}`);
+        this.falhas.forEach((f) => f(motivo));
+      }
+    }, 1000);
+  }
+
+  private async lerPainel(): Promise<RadioState> {
+    const { UsbSerial } = await import('../plugins/UsbSerial');
+    const r = await UsbSerial.espGet({ url: URL_PAINEL });
+    if (r.status !== 200) throw new Error(`painel respondeu ${r.status}`);
+    return this.doPainel(JSON.parse(r.body));
+  }
+
+  /** JSON do painel -> RadioState. Separado porque /api/config devolve o mesmo. */
+  private doPainel(j: Record<string, unknown>): RadioState {
+    // rssi/snr/lq so existem COM leitura -- o firmware omite os campos quando
+    // nao ha. Number.isFinite preserva essa ausencia em vez de virar zero, que
+    // numa escala negativa seria sinal maximo.
+    const num = (v: unknown) => (Number.isFinite(v) ? (v as number) : undefined);
+
+    // O painel e quem SABE a banda. Guardar aqui faz o caminho do cabo, que
+    // nao a carrega no CRSF, acertar a tabela de modem depois.
+    if (typeof j.band === 'string') setBandaCrsf(j.band);
+    return {
+      node: String(j.node ?? 'ELRS'),
+      band: String(j.band ?? '2g4'),
+      freq: Number(j.freq ?? 0),
+      sf: Number(j.sf ?? 0),
+      bw: Number(j.bw ?? 0),
+      cr: Number(j.cr ?? 0),
+      power: Number(j.power ?? 0),
+      rssi: num(j.rssi),
+      snr: num(j.snr),
+      lq: num(j.lq),
+      linked: Boolean(j.linked),
+      radioOk: j.radioOk !== false,
+      rate: num(j.rate),
+      rates: Array.isArray(j.rates) ? j.rates : undefined,
+      powers: Array.isArray(j.powers) ? j.powers : undefined,
+      domain: num(j.domain),
+      domains: Array.isArray(j.domains) ? j.domains : undefined,
+    };
+  }
+
+  /**
+   * Troca a taxa -- e, com ela, a BANDA.
+   *
+   * So existe pelo WiFi: o caminho do cabo e CRSF, que carrega telemetria e nao
+   * configuracao. O painel aceita a troca por GET, entao a mesma ponte nativa
+   * do espGet serve, sem inventar um POST.
+   *
+   * A outra ponta precisa da mesma taxa. Nao ha como este lado garantir isso --
+   * quem avisa e o texto na tela.
+   */
+  /** Troca o nivel de potencia. Mesma restricao do setRate: so pelo WiFi. */
+  async setPower(i: number): Promise<void> {
+    await this.mandarConfig(`pwr=${i}`);
+  }
+
+  /**
+   * Troca o plano de banda sub-GHz. A placa GRAVA e REINICIA -- por isso nao
+   * espera estado de volta: o que responderia ja esta em queda.
+   */
+  async setDomain(i: number): Promise<void> {
+    if (this.fonte !== 'wifi') throw new Error('so pelo WiFi do receptor');
+    const { UsbSerial } = await import('../plugins/UsbSerial');
+    const alvo = URL_PAINEL.replace('/api/state', '/api/config');
+    const r = await UsbSerial.espGet({ url: `${alvo}?domain=${i}` });
+    if (r.status !== 200) throw new Error(`painel recusou: ${r.status}`);
+    Diag.info('plano de banda gravado; a placa esta reiniciando');
+  }
+
+  async setRate(i: number): Promise<void> {
+    await this.mandarConfig(`rate=${i}`);
+  }
+
+  private async mandarConfig(query: string): Promise<void> {
+    if (this.fonte !== 'wifi') throw new Error('so pelo WiFi do receptor');
+    const { UsbSerial } = await import('../plugins/UsbSerial');
+    const alvo = URL_PAINEL.replace('/api/state', '/api/config');
+    const r = await UsbSerial.espGet({ url: `${alvo}?${query}` });
+    if (r.status !== 200) throw new Error(`painel recusou: ${r.status}`);
+    this.aplicar(this.doPainel(JSON.parse(r.body)));
+  }
+
+  private aplicar(s: RadioState) {
+    this.latest = s;
+    this.listeners.forEach((f) => f(s));
+  }
+
+  /** Avisa quando a serial cai sozinha, para quem quiser reconectar. */
+  onFailure(cb: (motivo: string) => void): () => void {
+    this.falhas.push(cb);
+    return () => {
+      this.falhas = this.falhas.filter((f) => f !== cb);
+    };
   }
 
   onState(cb: (s: RadioState) => void): () => void {

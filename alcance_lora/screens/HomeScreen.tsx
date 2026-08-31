@@ -10,6 +10,7 @@ import { Digit, Gauge } from '../components/Gauge';
 import { LinkLed } from '../components/LinkLed';
 import { exportText } from '../lib/exportFile';
 import { CloudState } from '../hooks/useRangeSession';
+import type { Fonte } from '../services/RadioService';
 
 type Mode = 'menu' | 'live' | 'open';
 
@@ -28,6 +29,11 @@ interface Props {
   serialConnected: boolean;
   telemetryAgeMs: number;
   transport: string;
+  fonte: Fonte;
+  onSetFonte: (f: Fonte) => Promise<void>;
+  onSetRate: (i: number) => Promise<void>;
+  onSetPower: (i: number) => Promise<void>;
+  onSetDomain: (i: number) => Promise<void>;
   cloud: CloudState;
   cloudMessage: string;
   onSyncNow: () => Promise<void>;
@@ -204,6 +210,93 @@ export const HomeScreen: React.FC<Props> = (p) => {
         usbInfo={p.usbInfo}
         usbPresent={p.usbPresent}
       />
+
+      {/* De onde vem a telemetria. O cabo e a medida limpa; o WiFi existe
+          porque o aparelho corta o USB ao bloquear a tela, e cobra por isso o
+          radio do receptor transmitindo na MESMA banda do enlace medido. */}
+      <div className="flex items-center gap-2 text-sm">
+        <span className="text-white/50">Telemetria por</span>
+        <div className="flex rounded-lg overflow-hidden border border-white/10">
+          {(['usb', 'wifi'] as const).map((f) => (
+            <button
+              key={f}
+              onClick={() => void p.onSetFonte(f)}
+              className={`px-3 py-1.5 ${
+                p.fonte === f ? 'bg-primary text-white' : 'bg-white/5 text-white/60'
+              }`}
+            >
+              {f === 'usb' ? 'Cabo USB' : 'WiFi'}
+            </button>
+          ))}
+        </div>
+      </div>
+      {/* Plano de banda sub-GHz. Grava e REINICIA a placa. */}
+      {p.fonte === 'wifi' && p.live?.domains && p.live.domains.length > 1 && (
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-white/50">Plano</span>
+          <select
+            value={String(p.live.domain ?? '')}
+            onChange={(e) => void p.onSetDomain(Number(e.target.value))}
+            className="rounded-lg bg-white/10 px-3 py-1.5"
+          >
+            {p.live.domains.map((d) => (
+              <option key={d.i} value={d.i}>
+                {d.nome} · {d.mhz} MHz · {d.ch} ch
+                {d.ok === false ? ' — fora da faixa do módulo' : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Taxa e banda. So pelo WiFi: o cabo fala CRSF, que leva telemetria e
+          nao configuracao. A lista vem do firmware, nunca daqui. */}
+      {p.fonte === 'wifi' && p.live?.rates && p.live.rates.length > 1 && (
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-white/50">Taxa</span>
+          <select
+            value={String(p.live.rate ?? '')}
+            onChange={(e) => void p.onSetRate(Number(e.target.value))}
+            className="rounded-lg bg-white/10 px-3 py-1.5"
+          >
+            {p.live.rates.map((r) => (
+              <option key={r.i} value={r.i}>
+                {r.b === '2g4' ? '2.4 GHz' : `${r.b} MHz`} · {r.hz} Hz
+                {r.c8 ? ' · 8 canais' : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      {p.fonte === 'wifi' && p.live?.rates && p.live.rates.length > 1 && (
+        <p className="text-xs text-white/40 -mt-1">
+          Trocar a taxa troca a banda. As DUAS pontas precisam da mesma.
+        </p>
+      )}
+
+      {/* Potencia com o dBm MEDIDO de cada nivel -- do datasheet do modulo, nao
+          o rotulo do nivel do ExpressLRS, que erra por 8 dB em 2,4 GHz. */}
+      {p.fonte === 'wifi' && p.live?.powers && p.live.powers.length > 1 && (
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-white/50">Potência</span>
+          <select
+            value={String(p.live.powers.find((x) => Math.abs(x.dbm - p.live!.power) < 0.05)?.i ?? '')}
+            onChange={(e) => void p.onSetPower(Number(e.target.value))}
+            className="rounded-lg bg-white/10 px-3 py-1.5"
+          >
+            {p.live.powers.map((x) => (
+              <option key={x.i} value={x.i}>{x.dbm} dBm</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {p.fonte === 'wifi' && (
+        <p className="text-xs text-white/40 -mt-1">
+          Conecte o celular ao WiFi do receptor. O AP dele transmite em 2,4 GHz,
+          a mesma banda do enlace — pode afetar a propria medida.
+        </p>
+      )}
 
       {p.error && (
         <div className="rounded-lg bg-danger/15 border border-danger/40 text-danger text-sm p-3">{p.error}</div>

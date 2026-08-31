@@ -8,7 +8,11 @@ import android.content.IntentFilter;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbManager;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.util.Log;
+import android.view.WindowManager;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -123,11 +127,113 @@ public class UsbSerialPlugin extends Plugin implements SerialInputOutputManager.
         usbManager.requestPermission(device, pi);
     }
 
+    /**
+     * GET no painel do ESP32, FORCADO pela interface WiFi.
+     *
+     * Duas coisas impedem um fetch() comum de chegar la:
+     *
+     * 1. A WebView do Capacitor serve de https://localhost, e buscar
+     *    http://192.168.4.1 dali e conteudo misto -- bloqueado pelo navegador.
+     *    Indo pelo nativo, nao ha origem https para violar.
+     *
+     * 2. O AP do ESP32 nao da internet. O Android mantem os dados moveis como
+     *    rede padrao, e uma conexao sem rota explicita sai por eles -- onde
+     *    192.168.4.1 nao existe. Por isso a conexao e aberta a partir do objeto
+     *    Network do WiFi: e o que amarra o socket a interface certa.
+     *
+     * Amarra por CONEXAO, nao o processo inteiro (bindProcessToNetwork). Assim
+     * os dados moveis continuam disponiveis para a sincronizacao com a nuvem,
+     * que precisa acontecer durante a mesma campanha.
+     */
+    @PluginMethod
+    public void espGet(PluginCall call) {
+        String url = call.getString("url");
+        if (url == null) {
+            call.reject("url ausente");
+            return;
+        }
+        try {
+            ConnectivityManager cm =
+                    (ConnectivityManager) getContext().getSystemService(Context.CONNECTIVITY_SERVICE);
+            Network wifi = null;
+            for (Network n : cm.getAllNetworks()) {
+                NetworkCapabilities c = cm.getNetworkCapabilities(n);
+                if (c != null && c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                    wifi = n;
+                    break;
+                }
+            }
+            if (wifi == null) {
+                call.reject("nenhuma rede WiFi ativa");
+                return;
+            }
+
+            java.net.HttpURLConnection conn =
+                    (java.net.HttpURLConnection) wifi.openConnection(new java.net.URL(url));
+            conn.setConnectTimeout(2500);
+            conn.setReadTimeout(2500);
+            conn.setRequestMethod("GET");
+
+            int status = conn.getResponseCode();
+            java.io.InputStream is = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            byte[] b = new byte[4096];
+            int k;
+            while (is != null && (k = is.read(b)) > 0) out.write(b, 0, k);
+            conn.disconnect();
+
+            JSObject r = new JSObject();
+            r.put("status", status);
+            r.put("body", out.toString("UTF-8"));
+            call.resolve(r);
+        } catch (Exception e) {
+            call.reject("falha ao falar com o painel: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Segura a tela ligada. Mora no plugin de SERIAL de proposito.
+     *
+     * Em aparelhos Samsung o bloqueio de tela dispara o UsbHostRestrictor, que
+     * corta o modo host do USB -- o log do aparelho mostra a sequencia inteira:
+     *
+     *     UsbHostRestrictor: enterRestriction: Screen Lock On
+     *     USB HOST UEVENT : STATE=REMOVE
+     *     [diag] leitura: USB get_status request failed
+     *
+     * Ou seja: a serial morre com a placa ligada e o cabo no lugar. Numa
+     * campanha de alcance isso e perder a medida no meio do caminho. Enquanto
+     * grava, a tela fica acesa; e o unico jeito de o app garantir o USB por
+     * conta propria, sem depender de o operador achar a opcao do sistema.
+     */
+    @PluginMethod
+    public void manterTelaAtiva(PluginCall call) {
+        final boolean on = call.getBoolean("on", true);
+        getActivity().runOnUiThread(() -> {
+            if (on) {
+                getActivity().getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            } else {
+                getActivity().getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            }
+        });
+        JSObject r = new JSObject();
+        r.put("success", true);
+        call.resolve(r);
+    }
+
     @PluginMethod
     public void open(PluginCall call) {
         // 420000: o baud unico do projeto. O JS manda explicito, mas um default
         // divergente seria uma armadilha para quem chamasse sem o parametro.
         int baudRate = call.getInt("baudRate", 420000);
+
+        // Abrir por cima de uma porta ja aberta e o que produzia
+        // "Queueing USB request failed": a segunda abertura reivindica a mesma
+        // interface e derruba a leitura da primeira. O lado JS agora serializa
+        // as chamadas, mas o plugin nao pode depender disso -- ele e quem
+        // detem o recurso, entao e ele quem garante que so ha uma porta.
+        fecharPorta();
+
         try {
             List<UsbSerialDriver> drivers = UsbSerialProber.getDefaultProber().findAllDrivers(usbManager);
             if (drivers.isEmpty()) {
@@ -169,12 +275,33 @@ public class UsbSerialPlugin extends Plugin implements SerialInputOutputManager.
         }
     }
 
+    /** Solta ioManager e porta, se houver. Silencioso e idempotente. */
+    private void fecharPorta() {
+        if (ioManager != null) {
+            try { ioManager.stop(); } catch (Exception ignored) { }
+            ioManager = null;
+        }
+        if (serialPort != null) {
+            try { serialPort.close(); } catch (Exception ignored) { }
+            serialPort = null;
+        }
+    }
+
     @Override
     public void onNewData(byte[] data) {
-        // Os bytes sobem como texto. A telemetria do firmware é ASCII, e assim
-        // o lado JS só precisa quebrar em linhas.
+        // Os bytes sobem em Base64, sem interpretação.
+        //
+        // Antes subiam como String(data, UTF_8), e isso funcionava enquanto a
+        // placa falava o texto da bancada. O receptor ExpressLRS fala CRSF
+        // binário: decodificar como UTF-8 troca toda sequência inválida por
+        // U+FFFD, ou seja, DESTRÓI o quadro antes de o JS o ver. O app lia o
+        // cabo inteiro e continuava dizendo "sem enlace".
+        //
+        // Base64 custa 33% de banda na ponte e devolve os bytes intactos. O
+        // lado JS decodifica e alimenta os dois leitores: o de quadros CRSF e
+        // o de linhas de texto, que continua servindo à bancada.
         JSObject ev = new JSObject();
-        ev.put("data", new String(data, StandardCharsets.UTF_8));
+        ev.put("data", android.util.Base64.encodeToString(data, android.util.Base64.NO_WRAP));
         notifyListeners("serialData", ev);
     }
 

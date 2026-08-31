@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Texto claro liberado APENAS para o painel do ESP32.
+
+  O Android bloqueia HTTP sem TLS desde o alvo 28, e com razao: numa rede
+  qualquer, texto claro e trafego lido por quem estiver junto. Mas 192.168.4.1
+  e o proprio receptor, num ponto de acesso ponto-a-ponto que ele mesmo cria.
+  Nao ha caminho para terceiro nenhum, e um ESP32 nao tem como servir HTTPS com
+  certificado valido.
+
+  Por isso a excecao e NOMINAL. Liberar cleartext no aplicativo inteiro, com
+  android:usesCleartextTraffic, resolveria o mesmo erro e de quebra abriria a
+  sincronizacao com o Supabase para texto claro. Ali passam credenciais e a
+  campanha inteira.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">192.168.4.1</domain>
+    </domain-config>
+</network-security-config>
